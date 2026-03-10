@@ -24,33 +24,37 @@ export class SletatApiService implements SletatClient {
 
   async loadDepartureCities(): Promise<SletatDictionaryItem[]> {
     const payload = await this.callSearchApi('SLETAT_ENDPOINT_DEPARTURE_CITIES', this.config.sletat.protocol, {});
-    return this.mapDictionary(payload, ['departures', 'departureCities', 'cities']);
+    return this.mapDictionary(payload, ['GetDepartCitiesResult', 'departures', 'departureCities', 'cities']);
   }
 
-  async loadCountries(): Promise<SletatDictionaryItem[]> {
-    const payload = await this.callSearchApi('SLETAT_ENDPOINT_COUNTRIES', this.config.sletat.protocol, {});
-    return this.mapDictionary(payload, ['countries']);
+  async loadCountries(townFromId = 832): Promise<SletatDictionaryItem[]> {
+    const payload = await this.callSearchApi('SLETAT_ENDPOINT_COUNTRIES', this.config.sletat.protocol, {
+      townFromId,
+    });
+    return this.mapDictionary(payload, ['GetCountriesResult', 'countries']);
   }
 
   async loadMeals(): Promise<SletatDictionaryItem[]> {
     const payload = await this.callSearchApi('SLETAT_ENDPOINT_MEALS', this.config.sletat.protocol, {});
-    return this.mapDictionary(payload, ['meals', 'foodTypes']);
+    return this.mapDictionary(payload, ['GetMealsResult', 'meals', 'foodTypes']);
   }
 
   async loadHotels(): Promise<SletatDictionaryItem[]> {
     const payload = await this.callSearchApi('SLETAT_ENDPOINT_HOTELS', this.config.sletat.protocol, {});
-    return this.mapDictionary(payload, ['hotels']);
+    return this.mapDictionary(payload, ['GetHotelsResult', 'hotels']);
   }
 
   async normalizeRequest(parsed: ParsedTourRequest): Promise<SletatNormalizedRequest> {
-    const [departures, countries, meals] = await Promise.all([
+    const [departures, meals] = await Promise.all([
       this.loadDepartureCities(),
-      this.loadCountries(),
       this.loadMeals(),
     ]);
+    const departureCityId = this.findDictionaryId(departures, parsed.departureCity);
+    const townFromId = departureCityId ? Number(departureCityId) : 832;
+    const countries = await this.loadCountries(townFromId);
 
     return {
-      departureCityId: this.findDictionaryId(departures, parsed.departureCity),
+      departureCityId,
       countryId: this.findDictionaryId(countries, parsed.country ?? parsed.resort),
       resortId: undefined,
       mealId: this.findDictionaryId(meals, parsed.mealType),
@@ -222,51 +226,101 @@ export class SletatApiService implements SletatClient {
   }
 
   private toSearchParams(request: SletatNormalizedRequest): Record<string, unknown> {
+    const dateFrom = request.dateFrom
+      ? new Date(request.dateFrom).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\./g, '/')
+      : undefined;
+    const dateTo = request.dateTo
+      ? new Date(request.dateTo).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\./g, '/')
+      : undefined;
     return {
-      departureCityId: request.departureCityId,
+      cityFromId: request.departureCityId,
       countryId: request.countryId,
-      resortId: request.resortId,
-      mealId: request.mealId,
-      hotelCategory: request.hotelCategory,
-      adults: request.adults,
-      children: request.children,
-      childrenAges: request.childrenAges?.join(','),
-      dateFrom: request.dateFrom,
-      dateTo: request.dateTo,
-      nightsFrom: request.nightsFrom,
-      nightsTo: request.nightsTo,
-      budgetMin: request.budgetMin,
-      budgetMax: request.budgetMax,
-      currency: request.currency,
+      cities: request.resortId,
+      meals: request.mealId,
+      stars: request.hotelCategory,
+      s_adults: request.adults ?? 2,
+      s_kids: request.children ?? 0,
+      s_kids_ages: request.childrenAges?.join(','),
+      s_nightsMin: request.nightsFrom ?? 3,
+      s_nightsMax: request.nightsTo ?? 15,
+      s_departFrom: dateFrom,
+      s_departTo: dateTo,
+      s_priceMin: request.budgetMin,
+      s_priceMax: request.budgetMax,
+      currencyAlias: request.currency ?? 'RUB',
+      requestId: 0,
+      pageSize: 10,
+      pageNumber: 1,
+      updateResult: 0,
+      includeDescriptions: 1,
+      s_hotelIsNotInStop: 'true',
+      s_hasTickets: 'true',
+      s_ticketsIncluded: 'true',
     };
   }
 
   private mapOffers(payload: Record<string, unknown>): SletatSearchOffer[] {
-    return this.pickArray(payload, ['offers', 'results', 'tours', 'data'])
-      .map((item) => ({
-        externalOfferId: String(item.externalOfferId ?? item.offerId ?? item.id ?? ''),
-        hotelName: String(item.hotelName ?? item.hotel ?? ''),
-        countryName: String(item.countryName ?? item.country ?? ''),
-        resortName: this.optionalString(item.resortName ?? item.resort),
-        mealName: this.optionalString(item.mealName ?? item.meal),
-        roomName: this.optionalString(item.roomName ?? item.room),
-        departureCity: this.optionalString(item.departureCity ?? item.departure),
-        dateFrom: this.optionalString(item.dateFrom ?? item.startDate),
-        dateTo: this.optionalString(item.dateTo ?? item.endDate),
-        nights: this.optionalNumber(item.nights),
-        price: Number(item.price ?? item.totalPrice ?? 0),
-        currency: String(item.currency ?? 'RUB'),
-      }))
-      .filter((item) => item.externalOfferId && item.hotelName && item.price > 0);
+    const raw = this.pickArray(payload, [
+      'GetToursResult',
+      'ActualizePriceResult',
+      'offers',
+      'results',
+      'tours',
+      'data',
+    ]);
+    return raw
+      .map((item) => this.normalizeOfferItem(item) as unknown as SletatSearchOffer)
+      .filter((item) => item.externalOfferId && item.hotelName && Number(item.price) > 0);
+  }
+
+  private normalizeOfferItem(item: Record<string, unknown> | unknown[]): Record<string, unknown> {
+    if (Array.isArray(item)) {
+      const priceStr = String(item[15] ?? '');
+      const priceMatch = priceStr.match(/[\d\s]+/);
+      const priceFromStr = priceMatch ? parseInt(priceMatch[0].replace(/\s/g, ''), 10) : 0;
+      const price = Number(item[42] ?? item[86] ?? (priceFromStr || 0));
+      return {
+        externalOfferId: String(item[0] ?? item[1] ?? ''),
+        hotelName: String(item[7] ?? item[60] ?? ''),
+        countryName: String(item[31] ?? ''),
+        resortName: String(item[19] ?? item[62] ?? ''),
+        mealName: String(item[10] ?? item[63] ?? ''),
+        roomName: String(item[9] ?? item[65] ?? ''),
+        departureCity: String(item[33] ?? ''),
+        dateFrom: String(item[12] ?? ''),
+        dateTo: String(item[13] ?? ''),
+        nights: this.optionalNumber(item[14]),
+        price: Number.isFinite(price) ? price : priceFromStr,
+        currency: String(item[43] ?? (priceStr.includes('RUB') ? 'RUB' : 'RUB')) as string,
+      };
+    }
+    return {
+      externalOfferId: String(item.externalOfferId ?? item.offerId ?? item.id ?? ''),
+      hotelName: String(item.hotelName ?? item.hotel ?? ''),
+      countryName: String(item.countryName ?? item.country ?? ''),
+      resortName: this.optionalString(item.resortName ?? item.resort),
+      mealName: this.optionalString(item.mealName ?? item.meal),
+      roomName: this.optionalString(item.roomName ?? item.room),
+      departureCity: this.optionalString(item.departureCity ?? item.departure),
+      dateFrom: this.optionalString(item.dateFrom ?? item.startDate),
+      dateTo: this.optionalString(item.dateTo ?? item.endDate),
+      nights: this.optionalNumber(item.nights),
+      price: Number(item.price ?? item.totalPrice ?? 0),
+      currency: String(item.currency ?? 'RUB'),
+    };
   }
 
   private mapDictionary(payload: Record<string, unknown>, keys: string[]) {
     return this.pickArray(payload, keys)
-      .map((item) => ({
-        id: String(item.id ?? item.code ?? ''),
-        code: String(item.code ?? item.id ?? ''),
-        name: String(item.name ?? item.title ?? ''),
-      }))
+      .map((item) => {
+        const id = item.id ?? item.Id ?? item.code ?? item.Code;
+        const name = item.name ?? item.Name ?? item.title ?? item.Title;
+        return {
+          id: String(id ?? ''),
+          code: String(item.code ?? item.Code ?? id ?? ''),
+          name: String(name ?? ''),
+        };
+      })
       .filter((item) => item.id && item.name);
   }
 
@@ -339,7 +393,12 @@ export class SletatApiService implements SletatClient {
         return value.filter((x): x is Record<string, unknown> => typeof x === 'object' && !!x);
       }
       if (value && typeof value === 'object') {
-        const nested = (value as Record<string, unknown>).items;
+        const v = value as Record<string, unknown>;
+        let nested = v.items ?? v.Data ?? v.data;
+        if (nested && typeof nested === 'object' && !Array.isArray(nested)) {
+          const inner = (nested as Record<string, unknown>).aaData ?? (nested as Record<string, unknown>).data;
+          nested = inner;
+        }
         if (Array.isArray(nested)) {
           return nested.filter((x): x is Record<string, unknown> => typeof x === 'object' && !!x);
         }
