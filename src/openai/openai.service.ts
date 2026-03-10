@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import OpenAI from 'openai';
+import { HttpsProxyAgent } from 'https-proxy-agent';
 import { AppConfigService } from '../config/config.service';
 import { ParsedTourRequest } from './dto/tour-request.schema';
 import * as fs from 'fs';
@@ -10,14 +11,19 @@ export class OpenAiService {
   private readonly client: OpenAI;
 
   constructor(private readonly config: AppConfigService) {
-    if (this.config.openAi.proxyUrl) {
-      process.env.HTTPS_PROXY = this.config.openAi.proxyUrl;
-      process.env.HTTP_PROXY = this.config.openAi.proxyUrl;
-      process.env.ALL_PROXY = this.config.openAi.proxyUrl;
+    const agent = this.config.openAi.proxyUrl
+      ? new HttpsProxyAgent(this.config.openAi.proxyUrl)
+      : undefined;
+
+    if (agent) {
       this.logger.log('OpenAI proxy is enabled via OPENAI_PROXY_URL');
     }
 
-    this.client = new OpenAI({ apiKey: this.config.openAi.apiKey });
+    this.client = new OpenAI({
+      apiKey: this.config.openAi.apiKey,
+      httpAgent: agent,
+      httpsAgent: agent,
+    });
   }
 
   async transcribeVoice(filePath: string): Promise<string> {
