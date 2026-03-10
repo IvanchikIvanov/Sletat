@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import OpenAI from 'openai';
 import { HttpsProxyAgent } from 'https-proxy-agent';
 import { AppConfigService } from '../config/config.service';
-import { ParsedTourRequest } from './dto/tour-request.schema';
+import { ParseTourResponse } from './dto/tour-request.schema';
 import * as fs from 'fs';
 
 @Injectable()
@@ -40,12 +40,19 @@ export class OpenAiService {
     }
   }
 
-  async parseTourRequest(text: string): Promise<ParsedTourRequest> {
+  async parseTourRequest(text: string): Promise<ParseTourResponse> {
     const systemPrompt =
-      'Ты помощник турагента. Твоя задача — разобрать запрос пользователя о туре и вернуть строгий JSON без лишних полей. ' +
-      'Не добавляй никаких комментариев, только JSON. Поля: ' +
-      'departureCity, country, resort, hotelCategory, mealType, adults, children, childrenAges, dateFrom, dateTo, ' +
-      'nightsFrom, nightsTo, budgetMin, budgetMax, currency, preferences.';
+      'Ты помощник турагента. Разбираешь запрос пользователя о туре.\n\n' +
+      'ОБЯЗАТЕЛЬНЫЕ поля для поиска:\n' +
+      '- departureCity — город вылета (Москва, Санкт-Петербург и т.д.)\n' +
+      '- country — страна (Турция, Египет и т.д.) ИЛИ resort — курорт (Анталья, Хургада)\n\n' +
+      'Если хотя бы одно обязательное поле отсутствует или неоднозначно — верни readyToSearch: false ' +
+      'и clarificationMessage — короткий дружелюбный вопрос на русском, что уточнить. Пиши естественно, не списком.\n\n' +
+      'Если всё понятно — readyToSearch: true, clarificationMessage не указывай.\n\n' +
+      'Верни ТОЛЬКО JSON без комментариев:\n' +
+      '{"readyToSearch": boolean, "clarificationMessage": "строка или null", "parsed": {' +
+      'departureCity, country, resort, hotelCategory, mealType, adults, children, childrenAges, ' +
+      'dateFrom, dateTo, nightsFrom, nightsTo, budgetMin, budgetMax, currency, preferences}}';
 
     try {
       const completion = await this.client.chat.completions.create({
@@ -63,8 +70,17 @@ export class OpenAiService {
         throw new Error('Empty response from OpenAI');
       }
 
-      const parsed = JSON.parse(content) as Partial<ParsedTourRequest>;
-      return parsed;
+      const raw = JSON.parse(content) as Record<string, unknown>;
+      const readyToSearch = Boolean(raw.readyToSearch);
+      const clarificationMessage =
+        typeof raw.clarificationMessage === 'string' ? raw.clarificationMessage : undefined;
+      const parsed = (raw.parsed ?? {}) as Record<string, unknown>;
+
+      return {
+        readyToSearch,
+        clarificationMessage: clarificationMessage || undefined,
+        parsed,
+      };
     } catch (error) {
       this.logger.error('Failed to parse tour request', error as Error);
       throw error;

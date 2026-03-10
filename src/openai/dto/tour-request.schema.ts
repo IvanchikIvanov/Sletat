@@ -17,3 +17,9 @@ export interface ParsedTourRequest {
   preferences?: string;
 }
 
+export interface ParseTourResponse {
+  readyToSearch: boolean;
+  clarificationMessage?: string;
+  parsed: ParsedTourRequest;
+}
+

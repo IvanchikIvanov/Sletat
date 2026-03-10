@@ -63,11 +63,16 @@ export class TelegramUpdate {
     const text = ctx.message.text;
     const user = await this.ensureUser(ctx);
 
-    const parsed = await this.openAi.parseTourRequest(text);
+    const response = await this.openAi.parseTourRequest(text);
+    if (!response.readyToSearch && response.clarificationMessage) {
+      await ctx.reply(response.clarificationMessage);
+      return;
+    }
+
     const result = await this.search.searchFromParsed({
       userId: user.id,
       rawText: text,
-      parsed,
+      parsed: response.parsed,
     });
 
     await this.telegram.sendSearchResults(ctx.chat!.id, result);
@@ -105,11 +110,16 @@ export class TelegramUpdate {
     const text = await this.openAi.transcribeVoice(tmpPath);
     await ctx.reply(`Распознал: "${text}"`);
 
-    const parsed = await this.openAi.parseTourRequest(text);
+    const response = await this.openAi.parseTourRequest(text);
+    if (!response.readyToSearch && response.clarificationMessage) {
+      await ctx.reply(response.clarificationMessage);
+      return;
+    }
+
     const result = await this.search.searchFromParsed({
       userId: user.id,
       rawText: text,
-      parsed,
+      parsed: response.parsed,
     });
 
     await this.telegram.sendSearchResults(ctx.chat!.id, result);
