@@ -16,6 +16,12 @@ npm install
 ```bash
 npx prisma generate
 ```
+
+> Важно по Prisma: проект рассчитан на Prisma 5.15.0.
+> Если вы запускаете `npx prisma ...` **до** `npm install`, `npx` может подтянуть Prisma 7 и вы получите ошибку `P1012` про `datasource url`.
+> Используйте локально установленный Prisma (после `npm install`) или явно:
+> `npx prisma@5.15.0 generate`
+
 # Explanation: Генерируем Prisma Client по schema.prisma.
 
 ```bash
