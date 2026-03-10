@@ -1,0 +1,136 @@
+import { Injectable } from '@nestjs/common';
+import { Telegraf } from 'telegraf';
+import { InjectBot } from 'nestjs-telegraf';
+import { NotificationReason, SearchResult } from '@prisma/client';
+import { encodeBookCallback, encodeWatchCallback } from './telegram.types';
+
+@Injectable()
+export class TelegramService {
+  constructor(@InjectBot() private readonly bot: Telegraf) {}
+
+  async sendSearchResults(
+    chatId: number,
+    payload: {
+      profileId: string;
+      profileName: string;
+      offers: {
+        id: string;
+        hotelName?: string | null;
+        countryName?: string | null;
+        resortName?: string | null;
+        mealName?: string | null;
+        dateFrom?: Date | null;
+        dateTo?: Date | null;
+        nights?: number | null;
+        price: number;
+        currency: string;
+        externalOfferId: string;
+      }[];
+    },
+  ) {
+    if (!payload.offers.length) {
+      await this.bot.telegram.sendMessage(
+        chatId,
+        'Ничего не нашлось по этому запросу, попробуй уточнить параметры.',
+      );
+      return;
+    }
+
+    const [best, ...rest] = payload.offers;
+    const lines = [
+      `Профиль: ${payload.profileName}`,
+      '',
+      this.formatOfferLine(best),
+      '',
+      'Другие варианты:',
+      ...rest.slice(0, 4).map((o, i) => `${i + 2}) ${this.formatOfferLine(o)}`),
+    ];
+
+    await this.bot.telegram.sendMessage(chatId, lines.join('\n'), {
+      reply_markup: {
+        inline_keyboard: [
+          [
+            {
+              text: 'Следить за ценой',
+              callback_data: encodeWatchCallback(payload.profileId),
+            },
+          ],
+          [
+            {
+              text: 'Бронировать лучший вариант',
+              callback_data: encodeBookCallback(best.id, payload.profileId),
+            },
+          ],
+        ],
+      },
+    });
+  }
+
+  async sendOfferNotification(
+    userId: string,
+    result: SearchResult,
+    reason: NotificationReason,
+  ) {
+    const chatId = Number(userId);
+    const reasonText =
+      reason === NotificationReason.PRICE_DROP
+        ? 'Цена понизилась!'
+        : 'Появился вариант в твоём бюджете!';
+
+    const text = `${reasonText}\n\n${this.formatOfferLine({
+      hotelName: result.hotelName,
+      countryName: result.countryName,
+      resortName: result.resortName,
+      mealName: result.mealName,
+      dateFrom: result.dateFrom,
+      dateTo: result.dateTo,
+      nights: result.nights,
+      price: result.price,
+      currency: result.currency,
+      id: result.id,
+      externalOfferId: result.externalOfferId,
+    })}`;
+
+    await this.bot.telegram.sendMessage(chatId, text, {
+      reply_markup: {
+        inline_keyboard: [
+          [
+            {
+              text: 'Бронировать',
+              callback_data: encodeBookCallback(result.id),
+            },
+          ],
+        ],
+      },
+    });
+  }
+
+  private formatOfferLine(o: {
+    hotelName?: string | null;
+    countryName?: string | null;
+    resortName?: string | null;
+    mealName?: string | null;
+    dateFrom?: Date | null;
+    dateTo?: Date | null;
+    nights?: number | null;
+    price: number;
+    currency: string;
+  }): string {
+    const parts: string[] = [];
+    if (o.hotelName) parts.push(o.hotelName);
+    if (o.countryName) parts.push(o.countryName);
+    if (o.resortName) parts.push(o.resortName);
+    if (o.mealName) parts.push(o.mealName);
+    if (o.nights) parts.push(`${o.nights} ночей`);
+    if (o.dateFrom && o.dateTo) {
+      parts.push(
+        `${o.dateFrom.toISOString().slice(0, 10)}–${o.dateTo
+          .toISOString()
+          .slice(0, 10)}`,
+      );
+    }
+    parts.push(`${o.price} ${o.currency}`);
+    return parts.join(', ');
+  }
+}
+

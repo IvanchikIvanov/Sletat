@@ -1,0 +1,175 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String          @id @default(cuid())
+  telegramId   String          @unique
+  username     String? 
+  firstName    String?
+  lastName     String?
+  languageCode String?
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+
+  searchProfiles  SearchProfile[]
+  searchRequests  SearchRequest[]
+  subscriptions   Subscription[]
+  notificationLog NotificationLog[]
+  bookings        Booking[]
+}
+
+model SearchProfile {
+  id                 String        @id @default(cuid())
+  userId             String
+  name               String
+  departureCityCode  String?
+  countryCode        String?
+  resortCode         String?
+  hotelCategory      String?
+  mealCode           String?
+  adults             Int?
+  children           Int?
+  childrenAges       Json?
+  dateFrom           DateTime?
+  dateTo             DateTime?
+  nightsFrom         Int?
+  nightsTo           Int?
+  budgetMin          Int?
+  budgetMax          Int?
+  currency           String?       @default("RUB")
+  isActive           Boolean       @default(true)
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+
+  user         User           @relation(fields: [userId], references: [id])
+  searchRequests SearchRequest[]
+  searchResults  SearchResult[]
+  subscriptions  Subscription[]
+  bookings       Booking[]
+}
+
+model SearchRequest {
+  id          String               @id @default(cuid())
+  userId      String
+  profileId   String?
+  rawText     String
+  parsedJson  Json?
+  status      SearchRequestStatus  @default(PENDING)
+  errorMessage String?
+  createdAt   DateTime             @default(now())
+
+  user    User          @relation(fields: [userId], references: [id])
+  profile SearchProfile @relation(fields: [profileId], references: [id])
+}
+
+model SearchResult {
+  id              String         @id @default(cuid())
+  profileId       String
+  externalOfferId String
+  hotelName       String?
+  countryName     String?
+  resortName      String?
+  mealName        String?
+  roomName        String?
+  departureCity   String?
+  dateFrom        DateTime?
+  dateTo          DateTime?
+  nights          Int?
+  price           Int
+  currency        String         @default("RUB")
+  isActive        Boolean        @default(true)
+  foundAt         DateTime       @default(now())
+
+  profile        SearchProfile   @relation(fields: [profileId], references: [id])
+  subscriptions  Subscription[]  @relation("SubscriptionLatestResult")
+  notificationLog NotificationLog[]
+  bookings       Booking[]
+
+  @@index([profileId])
+  @@index([externalOfferId])
+}
+
+model Subscription {
+  id                       String           @id @default(cuid())
+  profileId                String
+  userId                   String
+  minPrice                 Int?
+  maxPrice                 Int?
+  priceDropThresholdPercent Int              @default(15)
+  maxNotificationsPerDay   Int              @default(5)
+  isActive                 Boolean          @default(true)
+  createdAt                DateTime         @default(now())
+  updatedAt                DateTime         @updatedAt
+
+  profile          SearchProfile   @relation(fields: [profileId], references: [id])
+  user             User            @relation(fields: [userId], references: [id])
+  latestResult     SearchResult?   @relation("SubscriptionLatestResult", fields: [latestResultId], references: [id])
+  latestResultId   String?
+  notificationLog  NotificationLog[]
+
+  @@index([profileId])
+  @@index([userId])
+}
+
+model NotificationLog {
+  id             String              @id @default(cuid())
+  subscriptionId String
+  searchResultId String
+  userId         String
+  sentAt         DateTime            @default(now())
+  priceAtSend    Int
+  reason         NotificationReason
+
+  subscription Subscription  @relation(fields: [subscriptionId], references: [id])
+  searchResult SearchResult  @relation(fields: [searchResultId], references: [id])
+  user         User          @relation(fields: [userId], references: [id])
+
+  @@index([subscriptionId])
+  @@index([searchResultId])
+  @@index([userId])
+}
+
+model Booking {
+  id             String         @id @default(cuid())
+  userId         String
+  profileId      String?
+  searchResultId String
+  claimId        String?
+  status         BookingStatus  @default(PENDING)
+  lastError      String?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  user    User          @relation(fields: [userId], references: [id])
+  profile SearchProfile @relation(fields: [profileId], references: [id])
+  result  SearchResult  @relation(fields: [searchResultId], references: [id])
+
+  @@index([userId])
+  @@index([profileId])
+  @@index([searchResultId])
+}
+
+enum SearchRequestStatus {
+  PENDING
+  SUCCESS
+  FAILED
+}
+
+enum BookingStatus {
+  PENDING
+  CONFIRMED
+  CANCELLED
+  FAILED
+}
+
+enum NotificationReason {
+  PRICE_DROP
+  NEW_IN_BUDGET
+}
+
