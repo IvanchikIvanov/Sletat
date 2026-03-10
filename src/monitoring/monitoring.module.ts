@@ -4,6 +4,7 @@ import { MonitoringService } from './monitoring.service';
 import { MonitoringProcessor } from './monitoring.processor';
 import { NotificationProcessor } from './notification.processor';
 import { AppConfigService } from '../config/config.service';
+import { ConfigModule } from '../config/config.module';
 import { PersistenceModule } from '../persistence/persistence.module';
 import { SearchModule } from '../search/search.module';
 import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
@@ -13,6 +14,7 @@ import { TelegramModule } from '../telegram/telegram.module';
 @Module({
   imports: [
     BullModule.forRootAsync({
+      imports: [ConfigModule],
       inject: [AppConfigService],
       useFactory: (config: AppConfigService) => ({
         redis: config.redisUrl,
@@ -22,6 +24,7 @@ import { TelegramModule } from '../telegram/telegram.module';
       { name: 'monitoring' },
       { name: 'notification' },
     ),
+    ConfigModule,
     PersistenceModule,
     SearchModule,
     SubscriptionsModule,

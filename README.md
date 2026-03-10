@@ -92,3 +92,16 @@ npm install --legacy-peer-deps
 git fetch --all
 git checkout codex/verify-project-requirements-against-documentation
 ```
+
+
+### Troubleshooting Prisma P1000 (Authentication failed)
+
+Если `prisma migrate dev` падает с `P1000`, значит логин/пароль в `DATABASE_URL` не совпадают с реальным пользователем PostgreSQL.
+
+Проверьте подключение вручную:
+
+```bash
+psql "$DATABASE_URL" -c "select 1;"
+```
+
+Для локального системного PostgreSQL часто нужно создать пользователя/БД, либо обновить `DATABASE_URL` под существующие креды.
