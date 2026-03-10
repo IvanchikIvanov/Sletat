@@ -12,6 +12,9 @@ export interface SletatConfig {
   password: string;
   searchBaseUrl: string;
   claimsBaseUrl: string;
+  mode: 'mock' | 'api';
+  protocol: 'json' | 'xml';
+  claimsProtocol: 'json' | 'xml';
 }
 
 @Injectable()
@@ -51,7 +54,14 @@ export class AppConfigService {
       password: this.configService.getOrThrow<string>('SLETAT_PASSWORD'),
       searchBaseUrl: this.configService.getOrThrow<string>('SLETAT_SEARCH_BASE_URL'),
       claimsBaseUrl: this.configService.getOrThrow<string>('SLETAT_CLAIMS_BASE_URL'),
+      mode: this.configService.get<'mock' | 'api'>('SLETAT_MODE', 'api'),
+      protocol: this.configService.get<'json' | 'xml'>('SLETAT_PROTOCOL', 'json'),
+      claimsProtocol: this.configService.get<'json' | 'xml'>('SLETAT_CLAIMS_PROTOCOL', 'xml'),
     };
+  }
+
+  getString(key: string): string {
+    return this.configService.getOrThrow<string>(key);
   }
 
   get databaseUrl(): string {

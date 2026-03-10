@@ -39,3 +39,21 @@ docker-compose up --build
 
 API по умолчанию слушает порт `3000`, Telegram-бот работает через long polling.
 
+
+
+### Настройка реальной интеграции Sletat
+
+По умолчанию включен реальный клиент (`SLETAT_MODE=api`). Для локальных тестов можно вернуть заглушку (`SLETAT_MODE=mock`).
+
+Ключевые переменные окружения:
+
+- `SLETAT_PROTOCOL` — формат шлюза поиска (`json` или `xml`).
+- `SLETAT_CLAIMS_PROTOCOL` — формат шлюза заявок/платежей (`json` или `xml`).
+- `SLETAT_ENDPOINT_DEPARTURE_CITIES`, `SLETAT_ENDPOINT_COUNTRIES`, `SLETAT_ENDPOINT_MEALS`, `SLETAT_ENDPOINT_HOTELS`.
+- `SLETAT_ENDPOINT_SEARCH`, `SLETAT_ENDPOINT_ACTUALIZE`.
+- `SLETAT_ENDPOINT_CLAIM_CREATE`, `SLETAT_ENDPOINT_CLAIM_INFO`, `SLETAT_ENDPOINT_PAYMENTS`.
+
+Эти переменные позволяют зафиксировать пути методов в точном соответствии с вашей версией документации Sletat без изменения кода.
+
+
+Подробный пошаговый гайд по установке и настройке: `SETUP_GUIDE_RU.md`.

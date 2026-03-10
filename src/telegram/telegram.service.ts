@@ -115,6 +115,8 @@ export class TelegramService {
     nights?: number | null;
     price: number;
     currency: string;
+    id?: string;
+    externalOfferId?: string;
   }): string {
     const parts: string[] = [];
     if (o.hotelName) parts.push(o.hotelName);

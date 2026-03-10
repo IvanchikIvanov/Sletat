@@ -7,10 +7,9 @@ import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { BookingService } from '../booking/booking.service';
 import { TelegramService } from './telegram.service';
 import { decodeBookCallback, decodeWatchCallback } from './telegram.types';
-import axios from 'axios';
 import * as fs from 'fs';
 import * as path from 'path';
-import { fileURLToPath } from 'url';
+import * as https from 'https';
 
 @Update()
 export class TelegramUpdate {
@@ -87,12 +86,19 @@ export class TelegramUpdate {
     }
     const tmpPath = path.join(tmpDir, `${fileId}.oga`);
 
-    const response = await axios.get(fileLink.href, { responseType: 'stream' });
-    const writer = fs.createWriteStream(tmpPath);
-    response.data.pipe(writer);
     await new Promise<void>((resolve, reject) => {
-      writer.on('finish', () => resolve());
-      writer.on('error', (err) => reject(err));
+      const writer = fs.createWriteStream(tmpPath);
+      https
+        .get(fileLink.href, (response) => {
+          if (response.statusCode && response.statusCode >= 400) {
+            reject(new Error(`Failed to download voice file: ${response.statusCode}`));
+            return;
+          }
+          response.pipe(writer);
+          writer.on('finish', () => resolve());
+          writer.on('error', (err) => reject(err));
+        })
+        .on('error', (err) => reject(err));
     });
 
     const text = await this.openAi.transcribeVoice(tmpPath);
@@ -145,8 +151,8 @@ export class TelegramUpdate {
     });
 
     const paymentText = result.paymentUrl
-      ? `Ссылка на оплату (MOCK): ${result.paymentUrl}`
-      : 'Заявка создана (MOCK), менеджер свяжется с тобой.';
+      ? `Ссылка на оплату: ${result.paymentUrl}`
+      : 'Заявка создана, менеджер свяжется с тобой.';
 
     await ctx.answerCbQuery('Начинаем бронирование');
     await ctx.reply(
