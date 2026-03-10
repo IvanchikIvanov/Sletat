@@ -57,3 +57,32 @@ API по умолчанию слушает порт `3000`, Telegram-бот ра
 
 
 Подробный пошаговый гайд по установке и настройке: `SETUP_GUIDE_RU.md`.
+
+
+### Troubleshooting npm install
+
+Если при `npm install` возникает ошибка:
+
+```
+404 Not Found - @types/telegraf
+```
+
+это означает, что у вас локально/в ветке все еще присутствует устаревшая dev-зависимость `@types/telegraf`.
+
+Решение:
+
+1. Убедиться, что в `package.json` **нет** строки `@types/telegraf`.
+2. Обновить ветку до коммита с фиксом (или удалить зависимость вручную):
+
+```bash
+npm pkg delete devDependencies.@types/telegraf
+rm -rf node_modules package-lock.json
+npm install --legacy-peer-deps
+```
+
+3. Для установки с GitHub взять ветку с фиксами, если `main` еще не обновлен:
+
+```bash
+git fetch --all
+git checkout codex/verify-project-requirements-against-documentation
+```
