@@ -10,7 +10,7 @@ import { SearchModule } from '../search/search.module';
 import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
 import { BookingModule } from '../booking/booking.module';
 import { DialogModule } from '../dialog/dialog.module';
-import { PreferencesModule } from '../preferences/preferences.module';
+import { MemoryModule } from '../memory/memory.module';
 
 @Module({
   imports: [
@@ -21,7 +21,7 @@ import { PreferencesModule } from '../preferences/preferences.module';
     SubscriptionsModule,
     BookingModule,
     DialogModule,
-    PreferencesModule,
+    MemoryModule,
     TelegrafModule.forRootAsync({
       imports: [ConfigModule],
       inject: [AppConfigService],

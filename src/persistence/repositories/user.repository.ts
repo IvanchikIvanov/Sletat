@@ -35,5 +35,13 @@ export class UserRepository {
       },
     });
   }
+
+  /** Обновить страну пользователя (может меняться) */
+  async updateDefaultCountry(userId: string, country: string): Promise<User> {
+    return this.prisma.user.update({
+      where: { id: userId },
+      data: { defaultCountry: country },
+    });
+  }
 }
 

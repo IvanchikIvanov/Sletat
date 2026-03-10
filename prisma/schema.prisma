@@ -10,14 +10,15 @@ datasource db {
 }
 
 model User {
-  id           String          @id @default(cuid())
-  telegramId   String          @unique
-  username     String? 
-  firstName    String?
-  lastName     String?
-  languageCode String?
-  createdAt    DateTime        @default(now())
-  updatedAt    DateTime        @updatedAt
+  id              String          @id @default(cuid())
+  telegramId      String          @unique
+  username        String?
+  firstName       String?
+  lastName        String?
+  languageCode    String?
+  defaultCountry  String?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
 
   searchProfiles  SearchProfile[]
   searchRequests  SearchRequest[]
@@ -25,6 +26,7 @@ model User {
   notificationLog NotificationLog[]
   bookings        Booking[]
   preferences     UserPreference[]
+  facts           UserFact[]
 }
 
 model SearchProfile {
@@ -189,5 +191,41 @@ model UserPreference {
   user User @relation(fields: [userId], references: [id])
 
   @@index([userId])
+}
+
+model Knowledge {
+  id          String                    @id @default(cuid())
+  text        String
+  embedding   Unsupported("vector(1536)")?
+  category    String                    @default("tourism")
+  subcategory String?
+  source      String                    @default("web")
+  sourceUrl   String?
+  metadata    Json?
+  expiresAt   DateTime?
+  createdAt   DateTime                  @default(now())
+  updatedAt   DateTime                  @updatedAt
+
+  @@index([category])
+  @@index([category, subcategory])
+}
+
+model UserFact {
+  id         String                      @id @default(cuid())
+  userId     String
+  fact       String
+  category   String
+  key        String?
+  embedding  Unsupported("vector(1536)")?
+  confidence Float                       @default(1.0)
+  source     String                      @default("dialog")
+  createdAt  DateTime                    @default(now())
+  updatedAt  DateTime                    @updatedAt
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@unique([userId, key])
+  @@index([userId])
+  @@index([category])
 }
 

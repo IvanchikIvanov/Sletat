@@ -1,7 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { SletatClient } from './sletat.client';
 import { ParsedTourRequest } from '../openai/dto/tour-request.schema';
-import { SletatNormalizedRequest, SletatSearchOffer } from './sletat.types';
+import { SletatNormalizedRequest, SletatSearchOffer, SletatDictionaryItem } from './sletat.types';
 import { REDIS_CLIENT } from '../persistence/redis.provider';
 import type Redis from 'ioredis';
 
@@ -13,6 +13,35 @@ export class SletatService {
     @Inject('SLETAT_CLIENT') private readonly client: SletatClient,
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
   ) {}
+
+  /** Получить ID стран Sletat по списку названий (для visa-free поиска) */
+  async getCountryIdsByNames(
+    names: string[],
+    townFromId = 832,
+  ): Promise<string[]> {
+    const countries = await this.client.loadCountries(townFromId);
+    const ids: string[] = [];
+    const seen = new Set<string>();
+
+    for (const name of names) {
+      const id = this.findDictionaryId(countries, name);
+      if (id && !seen.has(id)) {
+        seen.add(id);
+        ids.push(id);
+      }
+    }
+
+    return ids;
+  }
+
+  private findDictionaryId(items: SletatDictionaryItem[], query?: string | null): string | undefined {
+    const value = query?.trim().toLowerCase();
+    if (!value) return undefined;
+    const exact = items.find((i) => i.name.toLowerCase() === value || i.code.toLowerCase() === value);
+    if (exact) return exact.id;
+    const partial = items.find((i) => i.name.toLowerCase().includes(value) || value.includes(i.name.toLowerCase()));
+    return partial?.id;
+  }
 
   async getDepartureCities() {
     return this.getCached('sletat:departureCities', () => this.client.loadDepartureCities());

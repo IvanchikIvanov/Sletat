@@ -4,7 +4,9 @@ import { SearchRequestRepository } from '../persistence/repositories/search-requ
 import { SearchResultRepository } from '../persistence/repositories/search-result.repository';
 import { SletatService } from '../sletat/sletat.service';
 import { SearchContext, SearchFromTextResult } from './dto/search-request.dto';
-import { SletatNormalizedRequest } from '../sletat/sletat.types';
+import { SletatNormalizedRequest, SletatSearchOffer } from '../sletat/sletat.types';
+
+const MAX_VISA_FREE_COUNTRIES_TO_SEARCH = 5;
 
 @Injectable()
 export class SearchService {
@@ -68,6 +70,122 @@ export class SearchService {
     const dbResults = await this.results.createManyForProfile(
       profile.id,
       offers.map((o) => ({
+        externalOfferId: o.externalOfferId,
+        hotelName: o.hotelName ?? null,
+        countryName: o.countryName ?? null,
+        resortName: o.resortName ?? null,
+        mealName: o.mealName ?? null,
+        roomName: o.roomName ?? null,
+        departureCity: o.departureCity ?? null,
+        dateFrom: o.dateFrom ? new Date(o.dateFrom) : null,
+        dateTo: o.dateTo ? new Date(o.dateTo) : null,
+        nights: o.nights ?? null,
+        price: o.price,
+        currency: o.currency,
+      })),
+    );
+
+    return {
+      profileId: profile.id,
+      profileName: profile.name,
+      offers: dbResults.map((r) => ({
+        id: r.id,
+        hotelName: r.hotelName,
+        countryName: r.countryName,
+        resortName: r.resortName,
+        mealName: r.mealName,
+        dateFrom: r.dateFrom,
+        dateTo: r.dateTo,
+        nights: r.nights,
+        price: r.price,
+        currency: r.currency,
+        externalOfferId: r.externalOfferId,
+      })),
+    };
+  }
+
+  /**
+   * Поиск по нескольким странам (для visa-free: страны без визы).
+   */
+  async searchFromParsedWithCountries(
+    context: SearchContext,
+    countryNames: string[],
+  ): Promise<SearchFromTextResult> {
+    const baseNormalized = await this.sletat.normalizeRequest(context.parsed);
+    const townFromId = baseNormalized.departureCityId
+      ? Number(baseNormalized.departureCityId)
+      : 832;
+
+    const countryIds = await this.sletat.getCountryIdsByNames(
+      countryNames.slice(0, MAX_VISA_FREE_COUNTRIES_TO_SEARCH),
+      townFromId,
+    );
+
+    if (!countryIds.length) {
+      return {
+        profileId: '',
+        profileName: `Страны без визы из ${context.parsed.departureCity ?? 'РФ'}`,
+        offers: [],
+      };
+    }
+
+    const allOffers: SletatSearchOffer[] = [];
+    const seenIds = new Set<string>();
+
+    for (const countryId of countryIds) {
+      const req: SletatNormalizedRequest = {
+        ...baseNormalized,
+        countryId,
+      };
+      const offers = await this.sletat.searchTours(req);
+      for (const o of offers) {
+        if (!seenIds.has(o.externalOfferId)) {
+          seenIds.add(o.externalOfferId);
+          allOffers.push(o);
+        }
+      }
+    }
+
+    allOffers.sort((a, b) => a.price - b.price);
+
+    const profileName = `Страны без визы из ${context.parsed.departureCity ?? 'РФ'}`;
+    const profile = await this.profiles.upsertForUser({
+      userId: context.userId,
+      name: profileName,
+      departureCityCode: baseNormalized.departureCityId ?? undefined,
+      countryCode: countryIds[0],
+      resortCode: undefined,
+      hotelCategory: baseNormalized.hotelCategory ?? undefined,
+      mealCode: baseNormalized.mealId,
+      adults: baseNormalized.adults,
+      children: baseNormalized.children,
+      childrenAges: baseNormalized.childrenAges,
+      dateFrom: baseNormalized.dateFrom ? new Date(baseNormalized.dateFrom) : undefined,
+      dateTo: baseNormalized.dateTo ? new Date(baseNormalized.dateTo) : undefined,
+      nightsFrom: baseNormalized.nightsFrom ?? undefined,
+      nightsTo: baseNormalized.nightsTo ?? undefined,
+      budgetMin: baseNormalized.budgetMin ?? undefined,
+      budgetMax: baseNormalized.budgetMax ?? undefined,
+      currency: baseNormalized.currency ?? undefined,
+    });
+
+    const request = await this.requests.createPending({
+      userId: context.userId,
+      profileId: profile.id,
+      rawText: context.rawText,
+      parsedJson: { ...context.parsed, destinationMode: 'visa_free' },
+    });
+
+    if (!allOffers.length) {
+      await this.requests.markFailed(request.id, 'No offers found');
+      return { profileId: profile.id, profileName: profile.name, offers: [] };
+    }
+
+    await this.requests.markSuccess(request.id, context.parsed);
+
+    const dbResults = await this.results.createManyForProfile(
+      profile.id,
+      allOffers.map((o) => ({
         externalOfferId: o.externalOfferId,
         hotelName: o.hotelName ?? null,
         countryName: o.countryName ?? null,

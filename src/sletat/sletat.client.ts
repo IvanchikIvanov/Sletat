@@ -3,7 +3,7 @@ import { ParsedTourRequest } from '../openai/dto/tour-request.schema';
 
 export interface SletatClient {
   loadDepartureCities(): Promise<SletatDictionaryItem[]>;
-  loadCountries(): Promise<SletatDictionaryItem[]>;
+  loadCountries(townFromId?: number): Promise<SletatDictionaryItem[]>;
   loadMeals(): Promise<SletatDictionaryItem[]>;
   loadHotels(): Promise<SletatDictionaryItem[]>;
 

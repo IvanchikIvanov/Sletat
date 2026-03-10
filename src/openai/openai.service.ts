@@ -6,6 +6,7 @@ import {
   ParseTourResponse,
   PreviousDialogContext,
 } from './dto/tour-request.schema';
+import { MemoryContext } from '../memory/dto/memory-context.dto';
 import * as fs from 'fs';
 
 @Injectable()
@@ -46,9 +47,9 @@ export class OpenAiService {
   async parseTourRequest(
     text: string,
     dialogContext?: PreviousDialogContext | null,
-    userPreferences?: string[],
+    memoryContext?: MemoryContext,
   ): Promise<ParseTourResponse> {
-    const systemPrompt = this.buildSystemPrompt(dialogContext, userPreferences);
+    const systemPrompt = this.buildSystemPrompt(dialogContext, memoryContext);
     const messages: OpenAI.ChatCompletionMessageParam[] = [
       { role: 'system', content: systemPrompt },
     ];
@@ -93,16 +94,31 @@ export class OpenAiService {
 
   private buildSystemPrompt(
     dialogContext?: PreviousDialogContext | null,
-    userPreferences?: string[],
+    memoryContext?: MemoryContext,
   ): string {
     let prompt =
       'Ты помощник турагента. Разбираешь запрос пользователя о туре.\n\n' +
       'ОБЯЗАТЕЛЬНЫЕ поля для поиска:\n' +
-      '- departureCity — город вылета (Москва, Санкт-Петербург и т.д.)\n' +
-      '- country — страна (Турция, Египет и т.д.) ИЛИ resort — курорт (Анталья, Хургада)\n\n' +
-      'Если хотя бы одно обязательное поле отсутствует или неоднозначно — верни readyToSearch: false ' +
-      'и clarificationMessage — короткий дружелюбный вопрос на русском, что уточнить. Пиши естественно, не списком.\n\n' +
+      '- departureCity — город вылета (Москва, Сочи, Санкт-Петербург и т.д.). По умолчанию большинство пользователей из РФ.\n' +
+      '- country — страна ИЛИ resort — курорт ИЛИ destinationMode (см. ниже)\n\n' +
+      'ОСОБЫЕ СЛУЧАИ:\n' +
+      '- Если пользователь говорит "без визы", "виза не нужна", "любая страна без визы", "куда угодно без визы" — ' +
+      'сначала проверь departureCity. Если город вылета НЕ указан — спроси: "Из какого города планируете вылет?" (большинство из РФ).\n' +
+      '- Если departureCity уже есть (например Сочи, Москва) и пользователь говорит "любая", "без визы", "неважно куда" — ' +
+      'ставь readyToSearch: true, destinationMode: "visa_free", country можно не указывать — бот сам найдёт страны без визы.\n' +
+      '- destinationMode: "visa_free" — пользователь хочет в страну без визы; "any" — любая страна; "specific" — указана конкретная страна.\n\n' +
+      'Если хотя бы одно обязательное поле отсутствует (и не подходит особый случай выше) — верни readyToSearch: false ' +
+      'и clarificationMessage — короткий дружелюбный вопрос на русском. Пиши естественно, не списком.\n\n' +
       'Если всё понятно — readyToSearch: true, clarificationMessage не указывай.\n\n';
+
+    if (memoryContext?.userFacts?.length) {
+      prompt +=
+        'ФАКТЫ О ПОЛЬЗОВАТЕЛЕ (из предыдущих разговоров):\n' +
+        memoryContext.userFacts.map((f, i) => `${i + 1}. ${f}`).join('\n') + '\n' +
+        'Учитывай эти факты: например, если известна страна пользователя — это влияет на визовые требования. ' +
+        'Если известен состав семьи — учти при заполнении adults/children. ' +
+        'Не переспрашивай то, что уже известно.\n\n';
+    }
 
     if (dialogContext?.parsed && Object.keys(dialogContext.parsed).length > 0) {
       prompt +=
@@ -115,18 +131,26 @@ export class OpenAiService {
         'Если пользователь хочет изменить ранее указанное поле — используй новое значение.\n\n';
     }
 
-    if (userPreferences?.length) {
+    if (memoryContext?.userPreferences?.length) {
       prompt +=
         'ПРЕДПОЧТЕНИЯ ПОЛЬЗОВАТЕЛЯ (из прошлых поисков):\n' +
-        userPreferences.map((p, i) => `${i + 1}. ${p}`).join('\n') + '\n' +
+        memoryContext.userPreferences.map((p, i) => `${i + 1}. ${p}`).join('\n') + '\n' +
         'Используй эти предпочтения как подсказку при заполнении необязательных полей, ' +
         'если пользователь не указал их явно. Не навязывай — только если уместно.\n\n';
+    }
+
+    if (memoryContext?.relevantKnowledge?.length) {
+      prompt +=
+        'ТУРИСТИЧЕСКИЕ ЗНАНИЯ (справочная информация):\n' +
+        memoryContext.relevantKnowledge.map((k, i) => `${i + 1}. ${k}`).join('\n') + '\n' +
+        'Используй эту информацию для более точных ответов и рекомендаций. ' +
+        'Например, если пользователь спрашивает про безвизовые страны — здесь может быть актуальный список.\n\n';
     }
 
     prompt +=
       'Верни ТОЛЬКО JSON без комментариев:\n' +
       '{"readyToSearch": boolean, "clarificationMessage": "строка или null", "parsed": {' +
-      'departureCity, country, resort, hotelCategory, mealType, adults, children, childrenAges, ' +
+      'departureCity, country, resort, destinationMode, hotelCategory, mealType, adults, children, childrenAges, ' +
       'dateFrom, dateTo, nightsFrom, nightsTo, budgetMin, budgetMax, currency, preferences}}';
 
     return prompt;

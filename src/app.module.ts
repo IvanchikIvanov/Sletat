@@ -11,6 +11,7 @@ import { TelegramModule } from './telegram/telegram.module';
 import { HealthModule } from './health/health.module';
 import { DialogModule } from './dialog/dialog.module';
 import { PreferencesModule } from './preferences/preferences.module';
+import { MemoryModule } from './memory/memory.module';
 
 @Module({
   imports: [
@@ -26,6 +27,7 @@ import { PreferencesModule } from './preferences/preferences.module';
     HealthModule,
     DialogModule,
     PreferencesModule,
+    MemoryModule,
   ],
 })
 export class AppModule {}

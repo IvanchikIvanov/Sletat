@@ -66,6 +66,10 @@ export class AppConfigService {
     return this.configService.getOrThrow<string>(key);
   }
 
+  getOptional<T = string>(key: string): T | undefined {
+    return this.configService.get<T>(key);
+  }
+
   get databaseUrl(): string {
     return this.configService.getOrThrow<string>('DATABASE_URL');
   }

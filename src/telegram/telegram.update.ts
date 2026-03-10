@@ -7,13 +7,28 @@ import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { BookingService } from '../booking/booking.service';
 import { TelegramService } from './telegram.service';
 import { DialogContextService } from '../dialog/dialog-context.service';
-import { UserPreferencesService } from '../preferences/user-preferences.service';
+import { MemoryService } from '../memory/memory.service';
 import { decodeBookCallback, decodeWatchCallback } from './telegram.types';
 import { ParseTourResponse } from '../openai/dto/tour-request.schema';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as https from 'https';
 import { IncomingMessage } from 'http';
+
+/** Определить страну по городу вылета (для обновления defaultCountry) */
+function inferCountryFromCity(city: string): string | null {
+  const lower = city.toLowerCase().trim();
+  const russianCities = [
+    'москва', 'сочи', 'санкт-петербург', 'спб', 'питер', 'казань', 'краснодар',
+    'екатеринбург', 'новосибирск', 'минеральные воды', 'ростов', 'самара',
+    'воронеж', 'нижний новгород', 'уфа', 'красноярск', 'пермь', 'волгоград',
+    'саратов', 'тюмень', 'толмачево', 'домодедово', 'шереметьево', 'внуково',
+  ];
+  if (russianCities.some((c) => lower.includes(c) || c.includes(lower))) {
+    return 'Россия';
+  }
+  return null;
+}
 
 @Update()
 export class TelegramUpdate {
@@ -25,7 +40,7 @@ export class TelegramUpdate {
     private readonly booking: BookingService,
     private readonly telegram: TelegramService,
     private readonly dialogCtx: DialogContextService,
-    private readonly preferences: UserPreferencesService,
+    private readonly memory: MemoryService,
   ) {}
 
   @Start()
@@ -113,13 +128,15 @@ export class TelegramUpdate {
     text: string,
   ): Promise<void> {
     const previous = await this.dialogCtx.get(userId);
-    const userPrefs = await this.preferences.findRelevantPreferences(userId, text);
+    const memoryCtx = await this.memory.getContextForQuery(userId, text);
 
     const response: ParseTourResponse = await this.openAi.parseTourRequest(
       text,
       previous ? { parsed: previous.parsed, messages: previous.messages } : null,
-      userPrefs.length ? userPrefs : undefined,
+      memoryCtx,
     );
+
+    this.memory.extractFactsFromMessage(userId, text).catch(() => {});
 
     if (!response.readyToSearch && response.clarificationMessage) {
       const mergedParsed = previous
@@ -147,13 +164,37 @@ export class TelegramUpdate {
 
     await this.dialogCtx.clear(userId);
 
-    const result = await this.search.searchFromParsed({
-      userId,
-      rawText: text,
-      parsed: finalParsed,
-    });
+    let result;
 
-    this.preferences.savePreferenceFromSearch(userId, finalParsed).catch(() => {});
+    if (
+      finalParsed.destinationMode === 'visa_free' &&
+      finalParsed.departureCity
+    ) {
+      const userCountry = await this.memory.getUserCountry(userId);
+      const countries = await this.memory.getVisaFreeCountries(
+        finalParsed.departureCity,
+        userCountry,
+      );
+      result = await this.search.searchFromParsedWithCountries(
+        { userId, rawText: text, parsed: finalParsed },
+        countries,
+      );
+    } else {
+      result = await this.search.searchFromParsed({
+        userId,
+        rawText: text,
+        parsed: finalParsed,
+      });
+    }
+
+    this.memory.saveSearchPreference(userId, finalParsed).catch(() => {});
+
+    if (finalParsed.departureCity) {
+      const country = inferCountryFromCity(finalParsed.departureCity);
+      if (country) {
+        this.users.updateDefaultCountry(userId, country).catch(() => {});
+      }
+    }
 
     await this.telegram.sendSearchResults(ctx.chat!.id, result);
   }

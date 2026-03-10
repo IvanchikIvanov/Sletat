@@ -19,13 +19,17 @@ export class SletatMockService implements SletatClient {
     return [
       { id: '1', code: 'MOW', name: 'Москва' },
       { id: '2', code: 'LED', name: 'Санкт-Петербург' },
+      { id: '3', code: 'AER', name: 'Сочи' },
     ];
   }
 
-  async loadCountries(): Promise<SletatDictionaryItem[]> {
+  async loadCountries(_townFromId?: number): Promise<SletatDictionaryItem[]> {
     return [
       { id: '10', code: 'TR', name: 'Турция' },
       { id: '11', code: 'EG', name: 'Египет' },
+      { id: '12', code: 'TH', name: 'Таиланд' },
+      { id: '13', code: 'AE', name: 'ОАЭ' },
+      { id: '14', code: 'VN', name: 'Вьетнам' },
     ];
   }
 
@@ -47,6 +51,8 @@ export class SletatMockService implements SletatClient {
       ? '1'
       : parsed.departureCity?.toLowerCase().includes('питер')
       ? '2'
+      : parsed.departureCity?.toLowerCase().includes('сочи')
+      ? '3'
       : undefined;
 
     const countryId = parsed.country?.toLowerCase().includes('турц')
