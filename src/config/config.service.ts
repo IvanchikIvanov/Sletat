@@ -5,6 +5,7 @@ export interface OpenAiConfig {
   apiKey: string;
   model: string;
   transcriptionModel: string;
+  proxyUrl?: string;
 }
 
 export interface SletatConfig {
@@ -45,6 +46,7 @@ export class AppConfigService {
         'OPENAI_TRANSCRIPTION_MODEL',
         'gpt-4o-mini-transcribe',
       ),
+      proxyUrl: this.configService.get<string>('OPENAI_PROXY_URL') || undefined,
     };
   }
 

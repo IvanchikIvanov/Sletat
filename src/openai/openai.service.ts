@@ -10,6 +10,13 @@ export class OpenAiService {
   private readonly client: OpenAI;
 
   constructor(private readonly config: AppConfigService) {
+    if (this.config.openAi.proxyUrl) {
+      process.env.HTTPS_PROXY = this.config.openAi.proxyUrl;
+      process.env.HTTP_PROXY = this.config.openAi.proxyUrl;
+      process.env.ALL_PROXY = this.config.openAi.proxyUrl;
+      this.logger.log('OpenAI proxy is enabled via OPENAI_PROXY_URL');
+    }
+
     this.client = new OpenAI({ apiKey: this.config.openAi.apiKey });
   }
 

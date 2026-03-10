@@ -12,6 +12,7 @@ export function validateEnv(config: Record<string, unknown>) {
     OPENAI_API_KEY: Joi.string().required(),
     OPENAI_MODEL: Joi.string().default('gpt-4.1-mini'),
     OPENAI_TRANSCRIPTION_MODEL: Joi.string().default('gpt-4o-mini-transcribe'),
+    OPENAI_PROXY_URL: Joi.string().uri().allow('').optional(),
 
     SLETAT_LOGIN: Joi.string().required(),
     SLETAT_PASSWORD: Joi.string().required(),

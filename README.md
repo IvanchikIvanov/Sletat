@@ -11,6 +11,10 @@ npm install
 
 Скопируй `.env.example` в `.env` и заполни значения (OpenAI, Telegram, Sletat и т.д.).
 
+Если OpenAI блокирует регион, можно указать прокси:
+
+- `OPENAI_PROXY_URL=http://user:pass@host:port`
+
 ### Prisma
 
 ```bash
