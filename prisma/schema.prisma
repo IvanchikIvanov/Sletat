@@ -115,6 +115,7 @@ model Subscription {
 
   @@index([profileId])
   @@index([userId])
+  @@unique([profileId, userId])
 }
 
 model NotificationLog {

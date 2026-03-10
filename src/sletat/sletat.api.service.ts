@@ -11,6 +11,7 @@ import {
 import * as https from 'https';
 import * as http from 'http';
 import { URL } from 'url';
+import { IncomingMessage } from 'http';
 
 type HttpMethod = 'GET' | 'POST';
 type Protocol = 'json' | 'xml';
@@ -202,10 +203,10 @@ export class SletatApiService implements SletatClient {
           method,
           headers,
         },
-        (res) => {
+        (res: IncomingMessage) => {
           let responseBody = '';
           res.setEncoding('utf8');
-          res.on('data', (chunk) => {
+          res.on('data', (chunk: string) => {
             responseBody += chunk;
           });
           res.on('end', () => {
@@ -214,7 +215,7 @@ export class SletatApiService implements SletatClient {
         },
       );
 
-      req.on('error', (err) => reject(err));
+      req.on('error', (err: Error) => reject(err));
       if (body) req.write(body);
       req.end();
     });

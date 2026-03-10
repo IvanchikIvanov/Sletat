@@ -23,7 +23,7 @@ import { BookingModule } from '../booking/booking.module';
       inject: [AppConfigService],
       useFactory: (config: AppConfigService) => ({
         token: config.telegramToken,
-        launchOptions: config.telegramUsePolling ? {} : { webhook: true },
+        launchOptions: config.telegramUsePolling ? {} : false,
       }),
     }),
   ],

@@ -15,9 +15,7 @@ import { TelegramModule } from '../telegram/telegram.module';
     BullModule.forRootAsync({
       inject: [AppConfigService],
       useFactory: (config: AppConfigService) => ({
-        redis: {
-          url: config.redisUrl,
-        },
+        redis: config.redisUrl,
       }),
     }),
     BullModule.registerQueue(

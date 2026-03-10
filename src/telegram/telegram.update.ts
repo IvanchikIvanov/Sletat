@@ -10,6 +10,7 @@ import { decodeBookCallback, decodeWatchCallback } from './telegram.types';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as https from 'https';
+import { IncomingMessage } from 'http';
 
 @Update()
 export class TelegramUpdate {
@@ -89,16 +90,16 @@ export class TelegramUpdate {
     await new Promise<void>((resolve, reject) => {
       const writer = fs.createWriteStream(tmpPath);
       https
-        .get(fileLink.href, (response) => {
+        .get(fileLink.href, (response: IncomingMessage) => {
           if (response.statusCode && response.statusCode >= 400) {
             reject(new Error(`Failed to download voice file: ${response.statusCode}`));
             return;
           }
           response.pipe(writer);
           writer.on('finish', () => resolve());
-          writer.on('error', (err) => reject(err));
+          writer.on('error', (err: Error) => reject(err));
         })
-        .on('error', (err) => reject(err));
+        .on('error', (err: Error) => reject(err));
     });
 
     const text = await this.openAi.transcribeVoice(tmpPath);

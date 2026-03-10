@@ -21,8 +21,7 @@ export class OpenAiService {
         model: this.config.openAi.transcriptionModel,
         language: 'ru',
       });
-      // @ts-expect-error openai sdk typing
-      return response.text ?? '';
+      return (response as { text?: string }).text ?? '';
     } catch (error) {
       this.logger.error('Failed to transcribe voice', error as Error);
       throw error;

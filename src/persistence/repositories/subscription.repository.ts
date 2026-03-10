@@ -25,10 +25,16 @@ export class SubscriptionRepository {
       create: {
         userId,
         profileId,
-        ...rest,
+        minPrice: rest.minPrice ?? undefined,
+        maxPrice: rest.maxPrice ?? undefined,
+        priceDropThresholdPercent: rest.priceDropThresholdPercent ?? undefined,
+        maxNotificationsPerDay: rest.maxNotificationsPerDay ?? undefined,
       },
       update: {
-        ...rest,
+        minPrice: rest.minPrice ?? undefined,
+        maxPrice: rest.maxPrice ?? undefined,
+        priceDropThresholdPercent: rest.priceDropThresholdPercent ?? undefined,
+        maxNotificationsPerDay: rest.maxNotificationsPerDay ?? undefined,
         isActive: true,
       },
     });
