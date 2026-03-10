@@ -9,6 +9,8 @@ import { MonitoringModule } from './monitoring/monitoring.module';
 import { BookingModule } from './booking/booking.module';
 import { TelegramModule } from './telegram/telegram.module';
 import { HealthModule } from './health/health.module';
+import { DialogModule } from './dialog/dialog.module';
+import { PreferencesModule } from './preferences/preferences.module';
 
 @Module({
   imports: [
@@ -22,6 +24,8 @@ import { HealthModule } from './health/health.module';
     BookingModule,
     TelegramModule,
     HealthModule,
+    DialogModule,
+    PreferencesModule,
   ],
 })
 export class AppModule {}

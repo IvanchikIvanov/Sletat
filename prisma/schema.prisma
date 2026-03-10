@@ -1,10 +1,12 @@
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [vector]
 }
 
 model User {
@@ -22,6 +24,7 @@ model User {
   subscriptions   Subscription[]
   notificationLog NotificationLog[]
   bookings        Booking[]
+  preferences     UserPreference[]
 }
 
 model SearchProfile {
@@ -172,5 +175,19 @@ enum BookingStatus {
 enum NotificationReason {
   PRICE_DROP
   NEW_IN_BUDGET
+}
+
+model UserPreference {
+  id        String                    @id @default(cuid())
+  userId    String
+  text      String
+  embedding Unsupported("vector(1536)")?
+  category  String                    @default("search")
+  metadata  Json?
+  createdAt DateTime                  @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
 }
 

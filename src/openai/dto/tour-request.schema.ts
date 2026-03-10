@@ -23,3 +23,13 @@ export interface ParseTourResponse {
   parsed: ParsedTourRequest;
 }
 
+export interface DialogMessageDto {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+export interface PreviousDialogContext {
+  parsed: ParsedTourRequest;
+  messages: DialogMessageDto[];
+}
+

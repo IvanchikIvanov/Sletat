@@ -9,6 +9,8 @@ import { OpenAiModule } from '../openai/openai.module';
 import { SearchModule } from '../search/search.module';
 import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
 import { BookingModule } from '../booking/booking.module';
+import { DialogModule } from '../dialog/dialog.module';
+import { PreferencesModule } from '../preferences/preferences.module';
 
 @Module({
   imports: [
@@ -18,6 +20,8 @@ import { BookingModule } from '../booking/booking.module';
     SearchModule,
     SubscriptionsModule,
     BookingModule,
+    DialogModule,
+    PreferencesModule,
     TelegrafModule.forRootAsync({
       imports: [ConfigModule],
       inject: [AppConfigService],
@@ -31,4 +35,3 @@ import { BookingModule } from '../booking/booking.module';
   exports: [TelegramService],
 })
 export class TelegramModule {}
-

@@ -1,12 +1,15 @@
-import { Ctx, Help, On, Start, Update, Action, Hears, Command } from 'nestjs-telegraf';
-import { Context, Input } from 'telegraf';
+import { Ctx, Help, On, Start, Update, Action, Command } from 'nestjs-telegraf';
+import { Context } from 'telegraf';
 import { OpenAiService } from '../openai/openai.service';
 import { UserRepository } from '../persistence/repositories/user.repository';
 import { SearchService } from '../search/search.service';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { BookingService } from '../booking/booking.service';
 import { TelegramService } from './telegram.service';
+import { DialogContextService } from '../dialog/dialog-context.service';
+import { UserPreferencesService } from '../preferences/user-preferences.service';
 import { decodeBookCallback, decodeWatchCallback } from './telegram.types';
+import { ParseTourResponse } from '../openai/dto/tour-request.schema';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as https from 'https';
@@ -21,11 +24,14 @@ export class TelegramUpdate {
     private readonly subscriptions: SubscriptionsService,
     private readonly booking: BookingService,
     private readonly telegram: TelegramService,
+    private readonly dialogCtx: DialogContextService,
+    private readonly preferences: UserPreferencesService,
   ) {}
 
   @Start()
   async onStart(@Ctx() ctx: Context) {
-    await this.ensureUser(ctx);
+    const user = await this.ensureUser(ctx);
+    await this.dialogCtx.clear(user.id);
     await ctx.reply(
       'Привет! Напиши, какой тур ты ищешь, или отправь голосовое сообщение.',
     );
@@ -63,19 +69,7 @@ export class TelegramUpdate {
     const text = ctx.message.text;
     const user = await this.ensureUser(ctx);
 
-    const response = await this.openAi.parseTourRequest(text);
-    if (!response.readyToSearch && response.clarificationMessage) {
-      await ctx.reply(response.clarificationMessage);
-      return;
-    }
-
-    const result = await this.search.searchFromParsed({
-      userId: user.id,
-      rawText: text,
-      parsed: response.parsed,
-    });
-
-    await this.telegram.sendSearchResults(ctx.chat!.id, result);
+    await this.handleTourRequest(ctx, user.id, text);
   }
 
   @On('voice')
@@ -110,17 +104,56 @@ export class TelegramUpdate {
     const text = await this.openAi.transcribeVoice(tmpPath);
     await ctx.reply(`Распознал: "${text}"`);
 
-    const response = await this.openAi.parseTourRequest(text);
+    await this.handleTourRequest(ctx, user.id, text);
+  }
+
+  private async handleTourRequest(
+    ctx: Context,
+    userId: string,
+    text: string,
+  ): Promise<void> {
+    const previous = await this.dialogCtx.get(userId);
+    const userPrefs = await this.preferences.findRelevantPreferences(userId, text);
+
+    const response: ParseTourResponse = await this.openAi.parseTourRequest(
+      text,
+      previous ? { parsed: previous.parsed, messages: previous.messages } : null,
+      userPrefs.length ? userPrefs : undefined,
+    );
+
     if (!response.readyToSearch && response.clarificationMessage) {
+      const mergedParsed = previous
+        ? this.dialogCtx.mergeParsed(previous.parsed, response.parsed)
+        : response.parsed;
+
+      const messages = previous?.messages ? [...previous.messages] : [];
+      messages.push({ role: 'user', content: text });
+      messages.push({ role: 'assistant', content: response.clarificationMessage });
+
+      await this.dialogCtx.save(userId, {
+        parsed: mergedParsed,
+        messages,
+        lastClarification: response.clarificationMessage,
+        updatedAt: new Date().toISOString(),
+      });
+
       await ctx.reply(response.clarificationMessage);
       return;
     }
 
+    const finalParsed = previous
+      ? this.dialogCtx.mergeParsed(previous.parsed, response.parsed)
+      : response.parsed;
+
+    await this.dialogCtx.clear(userId);
+
     const result = await this.search.searchFromParsed({
-      userId: user.id,
+      userId,
       rawText: text,
-      parsed: response.parsed,
+      parsed: finalParsed,
     });
+
+    this.preferences.savePreferenceFromSearch(userId, finalParsed).catch(() => {});
 
     await this.telegram.sendSearchResults(ctx.chat!.id, result);
   }
@@ -186,4 +219,3 @@ export class TelegramUpdate {
     return user;
   }
 }
-

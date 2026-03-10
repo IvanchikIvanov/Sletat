@@ -74,6 +74,13 @@ export class AppConfigService {
     return this.configService.getOrThrow<string>('REDIS_URL');
   }
 
+  get embeddingModel(): string {
+    return this.configService.get<string>(
+      'OPENAI_EMBEDDING_MODEL',
+      'text-embedding-3-small',
+    );
+  }
+
   get monitoringIntervalMs(): number {
     return Number(this.configService.get<string>('MONITORING_INTERVAL_MS', '900000'));
   }
