@@ -65,7 +65,7 @@ model SearchRequest {
   createdAt   DateTime             @default(now())
 
   user    User          @relation(fields: [userId], references: [id])
-  profile SearchProfile @relation(fields: [profileId], references: [id])
+  profile SearchProfile? @relation(fields: [profileId], references: [id])
 }
 
 model SearchResult {
@@ -147,7 +147,7 @@ model Booking {
   updatedAt      DateTime       @updatedAt
 
   user    User          @relation(fields: [userId], references: [id])
-  profile SearchProfile @relation(fields: [profileId], references: [id])
+  profile SearchProfile? @relation(fields: [profileId], references: [id])
   result  SearchResult  @relation(fields: [searchResultId], references: [id])
 
   @@index([userId])
