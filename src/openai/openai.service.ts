@@ -21,8 +21,7 @@ export class OpenAiService {
 
     this.client = new OpenAI({
       apiKey: this.config.openAi.apiKey,
-      httpAgent: agent,
-      httpsAgent: agent,
+      ...(agent && { httpAgent: agent, httpsAgent: agent }),
     });
   }
 
