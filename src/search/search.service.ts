@@ -217,11 +217,17 @@ export class SearchService {
   /**
    * Актуализация тура: проверяет через API Sletat, актуален ли оффер.
    * Возвращает обновлённый оффер или null если тур больше недоступен.
+   * Требует sourceId и requestId из поиска — для актуализации без них используйте результаты из БД.
    */
-  async actualizeOffer(externalOfferId: string): Promise<SletatSearchOffer | null> {
-    const result = await this.sletat.actualizeOffer(externalOfferId);
-    if (result) {
-      await this.results.updatePrice(externalOfferId, result.price, result.currency, result.tourUrl);
+  async actualizeOffer(params: {
+    offerId: string;
+    sourceId: string;
+    requestId?: string;
+    searchResultId?: string;
+  }): Promise<SletatSearchOffer | null> {
+    const result = await this.sletat.actualizeOffer(params);
+    if (result && params.searchResultId) {
+      await this.results.updatePrice(params.searchResultId, result.price, result.currency, result.tourUrl);
     }
     return result;
   }
@@ -264,6 +270,8 @@ export class SearchService {
   private offerToDbRow(o: SletatSearchOffer) {
     return {
       externalOfferId: o.externalOfferId,
+      sourceId: o.sourceId ?? null,
+      requestId: o.requestId ?? null,
       hotelName: o.hotelName ?? null,
       countryName: o.countryName ?? null,
       resortName: o.resortName ?? null,

@@ -1,4 +1,4 @@
-import { SletatClaimInfo, SletatDictionaryItem, SletatHotelItem, SletatNormalizedRequest, SletatSearchOffer, SletatShowcaseItem } from './sletat.types';
+import { SletatClaimInfo, SletatDictionaryItem, SletatHotelItem, SletatNormalizedRequest, SletatOrderTourist, SletatSearchOffer, SletatShowcaseItem } from './sletat.types';
 import { ParsedTourRequest } from '../openai/dto/tour-request.schema';
 
 export interface SletatClient {
@@ -13,9 +13,9 @@ export interface SletatClient {
 
   searchTours(request: SletatNormalizedRequest): Promise<SletatSearchOffer[]>;
 
-  actualizeOffer(externalOfferId: string): Promise<SletatSearchOffer | null>;
+  actualizeOffer(params: { offerId: string; sourceId: string; requestId?: string }): Promise<SletatSearchOffer | null>;
 
-  createClaim(offer: SletatSearchOffer, profileId: string, userId: string): Promise<SletatClaimInfo>;
+  createClaim(offer: SletatSearchOffer, tourist: SletatOrderTourist): Promise<SletatClaimInfo>;
 
   getClaimInfo(claimId: string): Promise<SletatClaimInfo>;
 

@@ -24,6 +24,8 @@ export interface SletatNormalizedRequest {
 
 export interface SletatSearchOffer {
   externalOfferId: string;
+  sourceId?: string;
+  requestId?: string;
   hotelName: string;
   countryName: string;
   resortName?: string;
@@ -42,6 +44,14 @@ export interface SletatClaimInfo {
   claimId: string;
   status: string;
   paymentUrl?: string;
+}
+
+/** Данные для SaveTourOrder — передача заявки менеджеру */
+export interface SletatOrderTourist {
+  name: string;
+  email: string;
+  phone: string;
+  comment?: string;
 }
 
 export interface SletatHotelItem {

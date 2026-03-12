@@ -79,7 +79,7 @@ export class TelegramService {
         row.push({ text: '🔗 Подробнее', callback_data: 'noop', url: o.tourUrl });
       }
       row.push({
-        text: '📝 Бронировать',
+        text: '📤 Передать менеджеру',
         callback_data: encodeBookCallback(o.id, payload.profileId),
       });
       keyboard.push(row);
@@ -144,7 +144,7 @@ export class TelegramService {
     if ((result as any).tourUrl) {
       actionRow.push({ text: '🔗 Подробнее', callback_data: 'noop', url: (result as any).tourUrl });
     }
-    actionRow.push({ text: '📝 Бронировать', callback_data: encodeBookCallback(result.id) });
+    actionRow.push({ text: '📤 Передать менеджеру', callback_data: encodeBookCallback(result.id) });
     keyboard.push(actionRow);
 
     await this.bot.telegram.sendMessage(chatId, `${reasonText}\n\n${card}`, {

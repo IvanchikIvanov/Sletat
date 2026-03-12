@@ -1,7 +1,7 @@
 import { Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { SletatClient } from './sletat.client';
 import { ParsedTourRequest } from '../openai/dto/tour-request.schema';
-import { SletatNormalizedRequest, SletatSearchOffer, SletatDictionaryItem, SletatHotelItem, SletatShowcaseItem } from './sletat.types';
+import { SletatNormalizedRequest, SletatOrderTourist, SletatSearchOffer, SletatDictionaryItem, SletatHotelItem, SletatShowcaseItem } from './sletat.types';
 import { CacheRepository } from '../persistence/repositories/cache.repository';
 import { REDIS_CLIENT } from '../persistence/redis.provider';
 import type Redis from 'ioredis';
@@ -239,12 +239,16 @@ export class SletatService implements OnModuleInit {
     return this.client.searchTours(request);
   }
 
-  async actualizeOffer(externalOfferId: string): Promise<SletatSearchOffer | null> {
-    return this.client.actualizeOffer(externalOfferId);
+  async actualizeOffer(params: {
+    offerId: string;
+    sourceId: string;
+    requestId?: string;
+  }): Promise<SletatSearchOffer | null> {
+    return this.client.actualizeOffer(params);
   }
 
-  async createClaim(offer: SletatSearchOffer, profileId: string, userId: string) {
-    return this.client.createClaim(offer, profileId, userId);
+  async createClaim(offer: SletatSearchOffer, tourist: SletatOrderTourist) {
+    return this.client.createClaim(offer, tourist);
   }
 
   async getClaimInfo(claimId: string) {

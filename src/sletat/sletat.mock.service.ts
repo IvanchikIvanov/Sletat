@@ -5,6 +5,7 @@ import {
   SletatDictionaryItem,
   SletatHotelItem,
   SletatNormalizedRequest,
+  SletatOrderTourist,
   SletatSearchOffer,
   SletatShowcaseItem,
 } from './sletat.types';
@@ -110,6 +111,8 @@ export class SletatMockService implements SletatClient {
     return [
       {
         externalOfferId: 'MOCK1',
+        sourceId: '970',
+        requestId: '343658640',
         hotelName: 'Mock Hotel 5*',
         countryName: 'Турция',
         resortName: 'Анталья',
@@ -125,15 +128,18 @@ export class SletatMockService implements SletatClient {
     ];
   }
 
-  async actualizeOffer(externalOfferId: string): Promise<SletatSearchOffer | null> {
+  async actualizeOffer(params: {
+    offerId: string;
+    sourceId: string;
+    requestId?: string;
+  }): Promise<SletatSearchOffer | null> {
     // MOCK IMPLEMENTATION
-    // TODO: replace with real Sletat API call
-    this.logger.debug(`Mock actualizeOffer called for: ${externalOfferId}`);
-    if (!externalOfferId) {
-      return null;
-    }
+    this.logger.debug(`Mock actualizeOffer called for: ${params.offerId}`);
+    if (!params.offerId) return null;
     return {
-      externalOfferId,
+      externalOfferId: params.offerId,
+      sourceId: params.sourceId,
+      requestId: params.requestId,
       hotelName: 'Mock Hotel 5* (actualized)',
       countryName: 'Турция',
       resortName: 'Анталья',
@@ -148,16 +154,13 @@ export class SletatMockService implements SletatClient {
     };
   }
 
-  async createClaim(offer: SletatSearchOffer, profileId: string, userId: string): Promise<SletatClaimInfo> {
+  async createClaim(offer: SletatSearchOffer, tourist: SletatOrderTourist): Promise<SletatClaimInfo> {
     // MOCK IMPLEMENTATION
-    // TODO: replace with real Sletat API call
-    this.logger.debug(
-      `Mock createClaim for offer=${offer.externalOfferId}, profile=${profileId}, user=${userId}`,
-    );
+    this.logger.debug(`Mock createClaim for offer=${offer.externalOfferId}, tourist=${tourist.name}`);
     return {
       claimId: `MOCK-CLAIM-${offer.externalOfferId}`,
       status: 'PENDING',
-      paymentUrl: `https://example.com/mock-payment/${offer.externalOfferId}`,
+      paymentUrl: undefined,
     };
   }
 

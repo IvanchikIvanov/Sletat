@@ -26,6 +26,8 @@ export class SearchResultRepository {
         data: {
           profileId,
           externalOfferId: r.externalOfferId,
+          sourceId: (r as any).sourceId ?? null,
+          requestId: (r as any).requestId ?? null,
           hotelName: r.hotelName,
           countryName: r.countryName,
           resortName: r.resortName,

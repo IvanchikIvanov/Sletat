@@ -212,14 +212,29 @@ export class TelegramUpdate {
     }
 
     this.logger.log(`/hot DB cache empty, falling back to API`);
-    const items = await this.sletat.getHotDealsAll();
-    this.logger.log(`/hot API fallback: ${items.length} items`);
-    if (items.length > 0) {
-      for (const item of items.slice(0, 3)) {
-        this.logger.debug(`  api item: ${JSON.stringify(item)}`);
+    const chatId = ctx.chat!.id;
+    await ctx.telegram.sendChatAction(chatId, 'typing');
+    const statusMsg = await ctx.reply('Ищу горящие туры... 🔥');
+    const typingInterval = setInterval(async () => {
+      try {
+        await ctx.telegram.sendChatAction(chatId, 'typing');
+      } catch {}
+    }, 4000);
+    try {
+      const items = await this.sletat.getHotDealsAll();
+      this.logger.log(`/hot API fallback: ${items.length} items`);
+      if (items.length > 0) {
+        for (const item of items.slice(0, 3)) {
+          this.logger.debug(`  api item: ${JSON.stringify(item)}`);
+        }
       }
+      await this.telegram.sendShowcaseResults(chatId, items, `🔥 Горящие туры из ${depCityName}:`);
+    } finally {
+      clearInterval(typingInterval);
+      try {
+        await ctx.telegram.deleteMessage(chatId, statusMsg.message_id);
+      } catch {}
     }
-    await this.telegram.sendShowcaseResults(ctx.chat!.id, items, `🔥 Горящие туры из ${depCityName}:`);
   }
 
   private async resolveUserDepartureCity(userId: string): Promise<{ id: string; name: string } | null> {
@@ -334,6 +349,30 @@ export class TelegramUpdate {
   }
 
   private async handleTourRequest(
+    ctx: Context,
+    userId: string,
+    text: string,
+  ): Promise<void> {
+    const chatId = ctx.chat!.id;
+    await ctx.telegram.sendChatAction(chatId, 'typing');
+    const statusMsg = await ctx.reply('Секунду, подбираю варианты... ✈️');
+    const typingInterval = setInterval(async () => {
+      try {
+        await ctx.telegram.sendChatAction(chatId, 'typing');
+      } catch {}
+    }, 4000);
+
+    try {
+      await this.handleTourRequestBody(ctx, userId, text);
+    } finally {
+      clearInterval(typingInterval);
+      try {
+        await ctx.telegram.deleteMessage(chatId, statusMsg.message_id);
+      } catch {}
+    }
+  }
+
+  private async handleTourRequestBody(
     ctx: Context,
     userId: string,
     text: string,
@@ -517,12 +556,8 @@ export class TelegramUpdate {
         offerId: decoded.offerId,
       });
 
-      const paymentText = result.paymentUrl
-        ? `Ссылка на оплату: ${result.paymentUrl}`
-        : 'Заявка создана, менеджер свяжется с тобой.';
-
       await ctx.reply(
-        `✅ Бронирование создано!\nСтатус: ${result.status}\n${paymentText}`,
+        `✅ Заявка передана менеджеру!\nМенеджер свяжется с тобой. Статус: ${result.status}`,
       );
     } catch (err) {
       const msg = (err as Error).message ?? 'Неизвестная ошибка';
@@ -531,9 +566,11 @@ export class TelegramUpdate {
       if (msg.includes('больше не доступен')) {
         await ctx.reply('😔 К сожалению, этот тур уже раскуплен. Попробуй выбрать другой вариант или запусти новый поиск.');
       } else if (msg.includes('временно недоступен') || msg.includes('Сервис временно')) {
-        await ctx.reply('⏳ Сервис бронирования временно недоступен. Попробуй через несколько минут.');
+        await ctx.reply('⏳ Сервис временно недоступен. Попробуй через несколько минут.');
+      } else if (msg.includes('нужен тур из поиска')) {
+        await ctx.reply('😕 Для передачи заявки нужен тур из поиска. Запусти новый поиск и выбери тур из результатов.');
       } else {
-        await ctx.reply(`❌ Не удалось забронировать: ${msg}\nПопробуй позже или выбери другой тур.`);
+        await ctx.reply(`❌ Не удалось передать заявку: ${msg}\nПопробуй позже или выбери другой тур.`);
       }
     }
   }

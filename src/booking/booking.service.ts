@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { BookingRepository } from '../persistence/repositories/booking.repository';
 import { SearchResultRepository } from '../persistence/repositories/search-result.repository';
+import { UserRepository } from '../persistence/repositories/user.repository';
 import { SletatService } from '../sletat/sletat.service';
 import { BookingStatus } from '@prisma/client';
 
@@ -11,6 +12,7 @@ export class BookingService {
   constructor(
     private readonly bookings: BookingRepository,
     private readonly results: SearchResultRepository,
+    private readonly users: UserRepository,
     private readonly sletat: SletatService,
   ) {}
 
@@ -29,26 +31,21 @@ export class BookingService {
       throw new Error('Offer not found');
     }
 
-    const actualized = await this.sletat.actualizeOffer(offer.externalOfferId);
+    if (!offer.sourceId || !offer.requestId) {
+      throw new Error(
+        'Для передачи заявки менеджеру нужен тур из поиска. Запусти новый поиск и выбери тур из результатов.',
+      );
+    }
+
+    const actualized = await this.sletat.actualizeOffer({
+      offerId: offer.externalOfferId,
+      sourceId: offer.sourceId,
+      requestId: offer.requestId,
+    });
     if (!actualized) {
       this.logger.warn(`Offer ${offer.externalOfferId} is no longer available`);
       throw new Error('Тур больше не доступен. Попробуйте выбрать другой вариант.');
     }
-
-    const offerData = {
-      externalOfferId: actualized.externalOfferId,
-      hotelName: actualized.hotelName ?? offer.hotelName ?? '',
-      countryName: actualized.countryName ?? offer.countryName ?? '',
-      resortName: actualized.resortName ?? offer.resortName ?? undefined,
-      mealName: actualized.mealName ?? offer.mealName ?? undefined,
-      roomName: actualized.roomName ?? offer.roomName ?? undefined,
-      departureCity: actualized.departureCity ?? offer.departureCity ?? undefined,
-      dateFrom: actualized.dateFrom ?? offer.dateFrom?.toISOString(),
-      dateTo: actualized.dateTo ?? offer.dateTo?.toISOString(),
-      nights: actualized.nights ?? offer.nights ?? undefined,
-      price: actualized.price,
-      currency: actualized.currency,
-    };
 
     if (actualized.price !== offer.price) {
       this.logger.log(
@@ -64,11 +61,28 @@ export class BookingService {
     });
 
     try {
-      const claim = await this.sletat.createClaim(
-        offerData,
-        params.profileId ?? '',
-        params.userId,
-      );
+      const user = await this.users.findById(params.userId);
+      const touristName =
+        user?.firstName || user?.lastName
+          ? [user.firstName, user.lastName].filter(Boolean).join(' ')
+          : user?.username
+            ? `@${user.username}`
+            : 'Пользователь Telegram';
+      const touristComment = user?.username ? `Telegram: @${user.username}` : 'Заявка из Telegram-бота';
+
+      const offerForClaim = {
+        ...actualized,
+        sourceId: actualized.sourceId ?? offer.sourceId ?? '',
+        requestId: actualized.requestId ?? offer.requestId ?? '',
+        countryName: actualized.countryName ?? offer.countryName ?? '',
+        departureCity: actualized.departureCity ?? offer.departureCity ?? '',
+      };
+      const claim = await this.sletat.createClaim(offerForClaim, {
+        name: touristName,
+        email: 'telegram@noreply.local',
+        phone: '+0',
+        comment: touristComment,
+      });
 
       await this.bookings.updateStatus(booking.id, BookingStatus.CONFIRMED, null, claim.claimId);
 

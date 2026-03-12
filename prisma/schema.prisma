@@ -77,6 +77,8 @@ model SearchResult {
   id              String         @id @default(cuid())
   profileId       String
   externalOfferId String
+  sourceId        String?
+  requestId       String?
   hotelName       String?
   countryName     String?
   resortName      String?

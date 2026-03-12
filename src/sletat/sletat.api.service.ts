@@ -7,6 +7,7 @@ import {
   SletatDictionaryItem,
   SletatHotelItem,
   SletatNormalizedRequest,
+  SletatOrderTourist,
   SletatSearchOffer,
   SletatShowcaseItem,
 } from './sletat.types';
@@ -125,12 +126,12 @@ export class SletatApiService implements SletatClient {
     );
 
     let offers = this.mapOffers(firstPayload);
+    let requestId = this.extractRequestId(firstPayload);
     if (offers.length > 0) {
       this.logger.debug(`Found ${offers.length} offers on first request`);
-      return offers;
+      return this.attachRequestId(offers, requestId);
     }
 
-    const requestId = this.extractRequestId(firstPayload);
     if (!requestId) {
       this.logger.warn('No requestId in GetTours response, cannot poll');
       return offers;
@@ -152,12 +153,17 @@ export class SletatApiService implements SletatClient {
       offers = this.mapOffers(pollPayload);
       if (offers.length > 0) {
         this.logger.debug(`Found ${offers.length} offers on poll attempt ${attempt + 1}`);
-        return offers;
+        return this.attachRequestId(offers, requestId);
       }
     }
 
     this.logger.warn(`No offers after ${maxAttempts} poll attempts`);
     return offers;
+  }
+
+  private attachRequestId(offers: SletatSearchOffer[], requestId?: string): SletatSearchOffer[] {
+    if (!requestId) return offers;
+    return offers.map((o) => ({ ...o, requestId }));
   }
 
   private extractRequestId(payload: Record<string, unknown>): string | undefined {
@@ -179,24 +185,90 @@ export class SletatApiService implements SletatClient {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
-  async actualizeOffer(externalOfferId: string): Promise<SletatSearchOffer | null> {
-    const payload = await this.callSearchApi('SLETAT_ENDPOINT_ACTUALIZE', this.config.sletat.protocol, {
-      offerId: externalOfferId,
-      sourceId: externalOfferId,
-    });
-    return this.mapOffers(payload)[0] ?? null;
+  async actualizeOffer(params: {
+    offerId: string;
+    sourceId: string;
+    requestId?: string;
+  }): Promise<SletatSearchOffer | null> {
+    const apiParams: Record<string, unknown> = {
+      offerId: params.offerId,
+      sourceId: params.sourceId,
+      currencyAlias: 'RUB',
+      showcase: 0,
+      detailed: 1,
+    };
+    if (params.requestId) apiParams.requestId = params.requestId;
+
+    const maxRetries = 3;
+    const retryDelayMs = 2000;
+    let lastError: Error | null = null;
+
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      try {
+        const payload = await this.callSearchApi(
+          'SLETAT_ENDPOINT_ACTUALIZE',
+          this.config.sletat.protocol,
+          apiParams,
+        );
+        const result = this.mapOffers(payload)[0] ?? null;
+        if (result) return result;
+
+        const top = payload.ActualizePriceResult ?? payload;
+        const isError = (top as Record<string, unknown>)?.IsError ?? (top as Record<string, unknown>)?.isError;
+        const errMsg = String((top as Record<string, unknown>)?.ErrorMessage ?? (top as Record<string, unknown>)?.errorMessage ?? '');
+        if (isError && errMsg) {
+          throw new Error(`Sletat API: ${errMsg}`);
+        }
+        return null;
+      } catch (err) {
+        lastError = err as Error;
+        const msg = lastError.message ?? '';
+        const isRetryable =
+          msg.includes('временно недоступен') ||
+          msg.includes('Сервис временно') ||
+          msg.includes('timeout') ||
+          msg.includes('ETIMEDOUT');
+        if (isRetryable && attempt < maxRetries - 1) {
+          this.logger.warn(`ActualizePrice attempt ${attempt + 1} failed, retrying: ${msg}`);
+          await this.sleep(retryDelayMs * (attempt + 1));
+        } else {
+          throw err;
+        }
+      }
+    }
+    throw lastError ?? new Error('ActualizePrice failed');
   }
 
-  async createClaim(offer: SletatSearchOffer, profileId: string, userId: string): Promise<SletatClaimInfo> {
-    const payload = await this.callClaimsApi('SLETAT_ENDPOINT_CLAIM_CREATE', this.config.sletat.claimsProtocol, {
-      offerId: offer.externalOfferId,
-      profileId,
-      userId,
-      price: offer.price,
-      currency: offer.currency,
-    }, 'POST');
+  async createClaim(offer: SletatSearchOffer, tourist: SletatOrderTourist): Promise<SletatClaimInfo> {
+    if (!offer.sourceId || !offer.requestId) {
+      throw new Error('Для передачи заявки менеджеру нужен тур из поиска (sourceId, requestId). Запусти новый поиск.');
+    }
 
-    return this.mapClaim(payload, offer.externalOfferId);
+    const payload = await this.callSearchApi('SLETAT_ENDPOINT_CLAIM_CREATE', this.config.sletat.protocol, {
+      searchRequestId: offer.requestId,
+      offerId: offer.externalOfferId,
+      sourceId: offer.sourceId,
+      user: tourist.name,
+      email: tourist.email,
+      phone: tourist.phone,
+      info: tourist.comment ?? '',
+      countryName: offer.countryName ?? 'Не указано',
+      cityFromName: offer.departureCity ?? 'Не указано',
+      currencyAlias: offer.currency ?? 'RUB',
+    });
+
+    const top = payload.SaveTourOrderResult ?? payload;
+    const isError = (top as Record<string, unknown>)?.IsError ?? (top as Record<string, unknown>)?.isError;
+    if (isError) {
+      const errMsg = String((top as Record<string, unknown>)?.ErrorMessage ?? 'SaveTourOrder failed');
+      throw new Error(`Sletat API: ${errMsg}`);
+    }
+
+    return {
+      claimId: `order-${offer.externalOfferId}`,
+      status: 'PENDING',
+      paymentUrl: undefined,
+    };
   }
 
   async getClaimInfo(claimId: string): Promise<SletatClaimInfo> {
@@ -412,7 +484,8 @@ export class SletatApiService implements SletatClient {
       const priceFromStr = priceMatch ? parseInt(priceMatch[0].replace(/\s/g, ''), 10) : 0;
       const price = Number(item[42] ?? item[86] ?? (priceFromStr || 0));
       return {
-        externalOfferId: String(item[0] ?? item[1] ?? ''),
+        externalOfferId: String(item[0] ?? ''),
+        sourceId: this.optionalString(item[1]),
         hotelName: String(item[7] ?? item[60] ?? ''),
         countryName: String(item[31] ?? ''),
         resortName: String(item[19] ?? item[62] ?? ''),
@@ -429,6 +502,7 @@ export class SletatApiService implements SletatClient {
     }
     return {
       externalOfferId: String(item.externalOfferId ?? item.offerId ?? item.id ?? ''),
+      sourceId: this.optionalString(item.sourceId ?? item.SourceId),
       hotelName: String(item.hotelName ?? item.hotel ?? ''),
       countryName: String(item.countryName ?? item.country ?? ''),
       resortName: this.optionalString(item.resortName ?? item.resort),
