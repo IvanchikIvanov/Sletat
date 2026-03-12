@@ -1,5 +1,6 @@
 import { Ctx, Help, On, Start, Update, Action, Command, InjectBot } from 'nestjs-telegraf';
 import { Context, Telegraf } from 'telegraf';
+import { Logger } from '@nestjs/common';
 import { OpenAiService } from '../openai/openai.service';
 import { UserRepository } from '../persistence/repositories/user.repository';
 import { SearchService } from '../search/search.service';
@@ -33,6 +34,7 @@ function inferCountryFromCity(city: string): string | null {
 
 @Update()
 export class TelegramUpdate {
+  private readonly logger = new Logger(TelegramUpdate.name);
   private botId: number | null = null;
   private botUsername: string | null = null;
 
@@ -176,8 +178,19 @@ export class TelegramUpdate {
   }
 
   private async sendHotDeals(ctx: Context, depCityId: string, depCityName: string) {
+    this.logger.log(`/hot request: depCityId=${depCityId}, depCityName=${depCityName}`);
+
     const dbDeals = await this.sletat.getHotDealsFromDb(Number(depCityId));
+    this.logger.log(`/hot DB cache: ${dbDeals.length} deals for dep ${depCityId}`);
+
     if (dbDeals.length > 0) {
+      for (const d of dbDeals.slice(0, 5)) {
+        this.logger.debug(`  deal: ${d.countryName} | ${d.hotelName} | ${d.starName} | ${d.resortName} | ${d.mealName} | ${d.nights}н | ${d.minPrice} ${d.currency} | date=${d.minPriceDate} | offerId=${d.offerId}`);
+      }
+      if (dbDeals.length > 5) {
+        this.logger.debug(`  ... and ${dbDeals.length - 5} more`);
+      }
+
       const lines = [`🔥 Горящие туры из ${depCityName}:`, ''];
       for (const d of dbDeals.slice(0, 15)) {
         const parts: string[] = [];
@@ -194,7 +207,14 @@ export class TelegramUpdate {
       return;
     }
 
+    this.logger.log(`/hot DB cache empty, falling back to API`);
     const items = await this.sletat.getHotDealsAll();
+    this.logger.log(`/hot API fallback: ${items.length} items`);
+    if (items.length > 0) {
+      for (const item of items.slice(0, 3)) {
+        this.logger.debug(`  api item: ${JSON.stringify(item)}`);
+      }
+    }
     await this.telegram.sendShowcaseResults(ctx.chat!.id, items, `🔥 Горящие туры из ${depCityName}:`);
   }
 
