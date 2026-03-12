@@ -270,12 +270,28 @@ export class SearchService {
       mealName: o.mealName ?? null,
       roomName: o.roomName ?? null,
       departureCity: o.departureCity ?? null,
-      dateFrom: o.dateFrom ? new Date(o.dateFrom) : null,
-      dateTo: o.dateTo ? new Date(o.dateTo) : null,
+      dateFrom: this.parseDate(o.dateFrom),
+      dateTo: this.parseDate(o.dateTo),
       nights: o.nights ?? null,
       price: o.price,
       currency: o.currency,
     };
+  }
+
+  private parseDate(raw?: string | null): Date | null {
+    if (!raw) return null;
+
+    // DD/MM/YYYY or DD.MM.YYYY
+    const ddmmyyyy = /^(\d{1,2})[\/.](\d{1,2})[\/.](\d{4})$/.exec(raw);
+    if (ddmmyyyy) {
+      const d = new Date(`${ddmmyyyy[3]}-${ddmmyyyy[2].padStart(2, '0')}-${ddmmyyyy[1].padStart(2, '0')}T00:00:00Z`);
+      if (!isNaN(d.getTime())) return d;
+    }
+
+    const d = new Date(raw);
+    if (!isNaN(d.getTime())) return d;
+
+    return null;
   }
 
   private buildResult(profileId: string, profileName: string, dbResults: any[]): SearchFromTextResult {
