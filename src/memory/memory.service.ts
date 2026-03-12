@@ -3,6 +3,7 @@ import { FactExtractorService } from './fact-extractor.service';
 import { UserPreferencesService } from '../preferences/user-preferences.service';
 import { KnowledgeService } from '../knowledge/knowledge.service';
 import { SletatService } from '../sletat/sletat.service';
+import { SearchProfileRepository } from '../persistence/repositories/search-profile.repository';
 import { MemoryContext } from './dto/memory-context.dto';
 import { ParsedTourRequest } from '../openai/dto/tour-request.schema';
 
@@ -15,16 +16,18 @@ export class MemoryService {
     private readonly preferences: UserPreferencesService,
     private readonly knowledge: KnowledgeService,
     private readonly sletat: SletatService,
+    private readonly profiles: SearchProfileRepository,
   ) {}
 
   async getContextForQuery(userId: string, query: string): Promise<MemoryContext> {
-    const [userFacts, userPreferences, relevantKnowledge] = await Promise.all([
+    const [userFacts, userPreferences, relevantKnowledge, userDefaults] = await Promise.all([
       this.factExtractor.getUserFacts(userId, query),
       this.preferences.findRelevantPreferences(userId, query),
       this.knowledge.findRelevantKnowledge(query),
+      this.getUserDefaults(userId),
     ]);
 
-    return { userFacts, userPreferences, relevantKnowledge };
+    return { userFacts, userPreferences, relevantKnowledge, userDefaults };
   }
 
   async extractFactsFromMessage(userId: string, message: string): Promise<void> {
@@ -37,6 +40,26 @@ export class MemoryService {
 
   async getUserCountry(userId: string): Promise<string | null> {
     return this.factExtractor.getUserFactByKey(userId, 'country_of_origin');
+  }
+
+  /**
+   * Получить дефолтные параметры из последнего профиля поиска.
+   * Используется для подстановки в промпт OpenAI, чтобы не переспрашивать.
+   */
+  async getUserDefaults(userId: string): Promise<Record<string, string> | null> {
+    const profile = await this.profiles.findLatestByUser(userId);
+    if (!profile) return null;
+
+    const defaults: Record<string, string> = {};
+    if (profile.departureCityCode) defaults.departureCityCode = profile.departureCityCode;
+    if (profile.countryCode) defaults.lastCountryCode = profile.countryCode;
+    if (profile.mealCode) defaults.lastMealCode = profile.mealCode;
+    if (profile.hotelCategory) defaults.lastHotelCategory = profile.hotelCategory;
+    if (profile.adults) defaults.lastAdults = String(profile.adults);
+    if (profile.children) defaults.lastChildren = String(profile.children);
+    if (profile.name) defaults.lastProfileName = profile.name;
+
+    return Object.keys(defaults).length > 0 ? defaults : null;
   }
 
   /**

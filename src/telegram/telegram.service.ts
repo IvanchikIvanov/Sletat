@@ -67,11 +67,11 @@ export class TelegramService {
   }
 
   async sendOfferNotification(
-    userId: string,
+    telegramId: string,
     result: SearchResult,
     reason: NotificationReason,
   ) {
-    const chatId = Number(userId);
+    const chatId = Number(telegramId);
     const reasonText =
       reason === NotificationReason.PRICE_DROP
         ? 'Цена понизилась!'
@@ -103,6 +103,11 @@ export class TelegramService {
         ],
       },
     });
+  }
+
+  async sendMessage(telegramId: string, text: string): Promise<void> {
+    const chatId = Number(telegramId);
+    await this.bot.telegram.sendMessage(chatId, text);
   }
 
   private formatOfferLine(o: {

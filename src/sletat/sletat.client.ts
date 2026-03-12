@@ -1,4 +1,4 @@
-import { SletatClaimInfo, SletatDictionaryItem, SletatNormalizedRequest, SletatSearchOffer } from './sletat.types';
+import { SletatClaimInfo, SletatDictionaryItem, SletatNormalizedRequest, SletatSearchOffer, SletatShowcaseItem } from './sletat.types';
 import { ParsedTourRequest } from '../openai/dto/tour-request.schema';
 
 export interface SletatClient {
@@ -18,5 +18,7 @@ export interface SletatClient {
   getClaimInfo(claimId: string): Promise<SletatClaimInfo>;
 
   getPayments(claimId: string): Promise<{ url: string; type: string }[]>;
+
+  loadShowcaseReview(townFromId?: number, currencyAlias?: string): Promise<SletatShowcaseItem[]>;
 }
 

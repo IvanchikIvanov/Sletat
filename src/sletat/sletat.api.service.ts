@@ -7,6 +7,7 @@ import {
   SletatDictionaryItem,
   SletatNormalizedRequest,
   SletatSearchOffer,
+  SletatShowcaseItem,
 } from './sletat.types';
 import * as https from 'https';
 import * as http from 'http';
@@ -44,6 +45,16 @@ export class SletatApiService implements SletatClient {
     return this.mapDictionary(payload, ['GetHotelsResult', 'hotels']);
   }
 
+  async loadShowcaseReview(townFromId = 832, currencyAlias = 'RUB'): Promise<SletatShowcaseItem[]> {
+    const payload = await this.callSearchApi('SLETAT_ENDPOINT_SHOWCASE_REVIEW', this.config.sletat.protocol, {
+      townFromId,
+      currencyAlias,
+      countryToursCount: 1,
+      showcase: 1,
+    });
+    return this.mapShowcase(payload);
+  }
+
   async normalizeRequest(parsed: ParsedTourRequest): Promise<SletatNormalizedRequest> {
     const [departures, meals] = await Promise.all([
       this.loadDepartureCities(),
@@ -73,12 +84,59 @@ export class SletatApiService implements SletatClient {
   }
 
   async searchTours(request: SletatNormalizedRequest): Promise<SletatSearchOffer[]> {
-    const payload = await this.callSearchApi(
+    const params = this.toSearchParams(request);
+
+    const firstPayload = await this.callSearchApi(
       'SLETAT_ENDPOINT_SEARCH',
       this.config.sletat.protocol,
-      this.toSearchParams(request),
+      params,
     );
-    return this.mapOffers(payload);
+
+    let offers = this.mapOffers(firstPayload);
+    if (offers.length > 0) {
+      return offers;
+    }
+
+    const requestId = this.extractRequestId(firstPayload);
+    if (!requestId) {
+      return offers;
+    }
+
+    const maxAttempts = 3;
+    const pollDelayMs = 2000;
+
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      await this.sleep(pollDelayMs);
+
+      const pollPayload = await this.callSearchApi(
+        'SLETAT_ENDPOINT_SEARCH',
+        this.config.sletat.protocol,
+        { ...params, requestId, updateResult: 1 },
+      );
+
+      offers = this.mapOffers(pollPayload);
+      if (offers.length > 0) {
+        return offers;
+      }
+    }
+
+    return offers;
+  }
+
+  private extractRequestId(payload: Record<string, unknown>): string | undefined {
+    const data = payload.GetToursResult ?? payload.data ?? payload;
+    if (typeof data === 'object' && data !== null) {
+      const d = data as Record<string, unknown>;
+      const id = d.requestId ?? d.RequestId;
+      if (id !== undefined && id !== null && id !== 0 && id !== '0') {
+        return String(id);
+      }
+    }
+    return undefined;
+  }
+
+  private sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   async actualizeOffer(externalOfferId: string): Promise<SletatSearchOffer | null> {
@@ -248,11 +306,14 @@ export class SletatApiService implements SletatClient {
       s_priceMin: request.budgetMin,
       s_priceMax: request.budgetMax,
       currencyAlias: request.currency ?? 'RUB',
+      s_showcase: 'true',
+      groupBy: 'hotel',
       requestId: 0,
       pageSize: 10,
       pageNumber: 1,
       updateResult: 0,
       includeDescriptions: 1,
+      includeOilTaxesAndVisa: 1,
       s_hotelIsNotInStop: 'true',
       s_hasTickets: 'true',
       s_ticketsIncluded: 'true',
@@ -331,6 +392,24 @@ export class SletatApiService implements SletatClient {
       status: String(claim.status ?? claim.state ?? 'PENDING'),
       paymentUrl: this.optionalString(claim.paymentUrl ?? claim.url),
     };
+  }
+
+  private mapShowcase(payload: Record<string, unknown>): SletatShowcaseItem[] {
+    const raw = this.pickArray(payload, ['GetShowcaseReviewResult', 'data', 'Data']);
+    return raw
+      .map((item) => ({
+        countryId: String(item.CountryId ?? item.countryId ?? ''),
+        countryName: String(item.CountryName ?? item.countryName ?? ''),
+        hotelName: this.optionalString(item.HotelName ?? item.hotelName),
+        starName: this.optionalString(item.StarName ?? item.starName),
+        resortName: this.optionalString(item.ResortName ?? item.resortName),
+        mealName: this.optionalString(item.MealName ?? item.mealName),
+        minPrice: String(item.MinPrice ?? item.minPrice ?? ''),
+        minPriceDate: this.optionalString(item.MinPriceDate ?? item.minPriceDate),
+        nights: this.optionalNumber(item.Nights ?? item.nights),
+        offerId: this.optionalString(item.OfferId ?? item.offerId),
+      }))
+      .filter((item) => item.countryId && item.countryName);
   }
 
   private parseJson(text: string): Record<string, unknown> {

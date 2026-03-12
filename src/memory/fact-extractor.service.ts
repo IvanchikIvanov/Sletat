@@ -6,24 +6,23 @@ import { AppConfigService } from '../config/config.service';
 import { ExtractedFact } from './dto/user-fact.dto';
 
 const EXTRACTION_PROMPT = `Ты анализируешь сообщение пользователя туристического бота.
-Извлеки ТОЛЬКО явные факты о пользователе (не о туре, который он ищет).
+Извлеки ТОЛЬКО явные факты о пользователе (не о туре, который он ищет прямо сейчас).
 
-Категории:
-- personal: страна проживания, город, язык, день рождения, имя
-- family: состав семьи, количество детей, возраст детей, семейное положение
-- travel: наличие загранпаспорта, визы, любимые/нелюбимые страны, страх перелётов, аллергии
-- preferences: предпочитаемый бюджет, тип отдыха (пляж/экскурсии/горы), тип питания, категория отелей
+Категории и ключи:
+- personal: country_of_origin, city_of_origin, birthday, user_name, language, citizenship
+- family: children_count, children_ages, family_size, marital_status, traveling_with (кто едет: пара, семья, друзья, один)
+- travel: passport_type (загран/внутренний), has_schengen_visa, fear_of_flying, allergies, health_restrictions, favorite_countries, disliked_countries, visited_countries
+- preferences: preferred_budget_range, preferred_vacation_type (пляж/экскурсии/горы/городской), preferred_meal, preferred_hotel_stars, preferred_departure_city, preferred_duration_nights, preferred_season
 
-Ключи для дедупликации (key):
-- country_of_origin, city_of_origin, birthday, language
-- children_count, family_size, marital_status
-- passport_type, fear_of_flying, allergies, favorite_countries, disliked_countries
-- preferred_budget, preferred_vacation_type, preferred_meal, preferred_hotel_stars
+Верни JSON: {"facts": [...]}. Если фактов нет — {"facts": []}.
+Каждый факт: {"fact": "описание на русском", "category": "категория", "key": "ключ", "confidence": 0.0-1.0}
 
-Верни JSON-массив. Если фактов нет — верни [].
-Пример: [{"fact": "Пользователь из Казахстана", "category": "personal", "key": "country_of_origin"}]
+confidence:
+- 1.0 — пользователь явно сказал ("я из Москвы", "у меня двое детей")
+- 0.7 — можно уверенно вывести из контекста ("мы с женой" → marital_status: женат, traveling_with: пара)
+- 0.5 — предположение ("ищу тур из Москвы" → preferred_departure_city: Москва)
 
-ВАЖНО: извлекай только то, что пользователь явно сообщил. Не додумывай.`;
+ВАЖНО: извлекай только то, что пользователь явно сообщил или что однозначно следует из сообщения. Не додумывай.`;
 
 interface FactRow {
   id: string;
@@ -119,19 +118,25 @@ export class FactExtractorService {
   }
 
   private async upsertFact(userId: string, fact: ExtractedFact): Promise<void> {
+    const confidence = fact.confidence ?? 1.0;
     const embedding = await this.generateEmbedding(fact.fact);
     const vectorLiteral = `[${embedding.join(',')}]`;
 
     await this.prisma.$executeRawUnsafe(
       `INSERT INTO "UserFact" ("id", "userId", "fact", "category", "key", "embedding", "confidence", "source", "createdAt", "updatedAt")
-       VALUES (gen_random_uuid()::text, $1, $2, $3, $4, $5::vector, 1.0, 'dialog', NOW(), NOW())
+       VALUES (gen_random_uuid()::text, $1, $2, $3, $4, $5::vector, $6, 'dialog', NOW(), NOW())
        ON CONFLICT ("userId", "key")
-       DO UPDATE SET "fact" = $2, "category" = $3, "embedding" = $5::vector, "updatedAt" = NOW()`,
+       DO UPDATE SET "fact" = CASE WHEN $6 >= "UserFact"."confidence" THEN $2 ELSE "UserFact"."fact" END,
+                     "category" = $3,
+                     "embedding" = CASE WHEN $6 >= "UserFact"."confidence" THEN $5::vector ELSE "UserFact"."embedding" END,
+                     "confidence" = GREATEST("UserFact"."confidence", $6),
+                     "updatedAt" = NOW()`,
       userId,
       fact.fact,
       fact.category,
       fact.key,
       vectorLiteral,
+      confidence,
     );
   }
 

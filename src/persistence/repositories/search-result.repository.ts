@@ -54,5 +54,12 @@ export class SearchResultRepository {
   findById(id: string): Promise<SearchResult | null> {
     return this.prisma.searchResult.findUnique({ where: { id } });
   }
+
+  async updatePrice(id: string, price: number, currency: string): Promise<SearchResult> {
+    return this.prisma.searchResult.update({
+      where: { id },
+      data: { price, currency },
+    });
+  }
 }
 

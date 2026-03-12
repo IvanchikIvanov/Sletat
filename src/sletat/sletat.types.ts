@@ -43,3 +43,16 @@ export interface SletatClaimInfo {
   paymentUrl?: string;
 }
 
+export interface SletatShowcaseItem {
+  countryId: string;
+  countryName: string;
+  hotelName?: string;
+  starName?: string;
+  resortName?: string;
+  mealName?: string;
+  minPrice: string;
+  minPriceDate?: string;
+  nights?: number;
+  offerId?: string;
+}
+

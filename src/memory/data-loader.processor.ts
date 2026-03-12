@@ -152,10 +152,105 @@ export class DataLoaderProcessor {
     }
   }
 
+  @Process('load-showcase-review')
+  async handleLoadShowcaseReview(job: Job) {
+    this.logger.log('Loading showcase review (hot tours)...');
+
+    try {
+      const departureCities = await this.sletat.getDepartureCities();
+      const popularCities = departureCities.slice(0, 5);
+
+      for (const city of popularCities) {
+        try {
+          const showcase = await this.sletat.getShowcaseReview(Number(city.id), 'RUB');
+          if (!showcase.length) continue;
+
+          const lines = showcase.map(
+            (s) => `${s.countryName}: от ${s.minPrice}, ${s.hotelName ?? ''} ${s.starName ?? ''}, ${s.nights ?? '?'} ночей`,
+          );
+
+          const text = `Горящие туры из ${city.name} (${new Date().toISOString().slice(0, 10)}):\n${lines.join('\n')}`;
+
+          await this.knowledge.saveKnowledgeExtended({
+            text,
+            category: 'hot_tours',
+            subcategory: city.name.toLowerCase(),
+            source: 'sletat',
+            metadata: {
+              cityId: city.id,
+              cityName: city.name,
+              items: showcase,
+              loadedAt: new Date().toISOString(),
+            },
+            expiresAt: new Date(Date.now() + 2 * 60 * 60 * 1000),
+          });
+
+          this.logger.log(`Loaded ${showcase.length} showcase items for ${city.name}`);
+        } catch (error) {
+          this.logger.warn(`Failed to load showcase for ${city.name}`, error);
+        }
+      }
+    } catch (error) {
+      this.logger.error('Failed to load showcase review', error);
+    }
+  }
+
   @Process('cleanup-expired')
   async handleCleanup(job: Job) {
     this.logger.log('Cleaning up expired knowledge entries...');
     await this.knowledge.cleanupExpired();
+  }
+
+  @Process('load-seasonal-recommendations')
+  async handleLoadSeasonalRecommendations(job: Job) {
+    this.logger.log('Loading seasonal recommendations...');
+
+    try {
+      const now = new Date();
+      const monthNames = [
+        'январь', 'февраль', 'март', 'апрель', 'май', 'июнь',
+        'июль', 'август', 'сентябрь', 'октябрь', 'ноябрь', 'декабрь',
+      ];
+      const currentMonth = monthNames[now.getMonth()];
+      const nextMonth = monthNames[(now.getMonth() + 1) % 12];
+
+      const recommendations = await this.askSeasonalRecommendations(currentMonth, nextMonth);
+      if (!recommendations) return;
+
+      await this.knowledge.saveKnowledgeExtended({
+        text: recommendations,
+        category: 'seasonal',
+        subcategory: currentMonth,
+        source: 'openai',
+        metadata: { month: currentMonth, nextMonth, generatedAt: now.toISOString() },
+        expiresAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
+      });
+
+      this.logger.log(`Saved seasonal recommendations for ${currentMonth}`);
+    } catch (error) {
+      this.logger.error('Failed to load seasonal recommendations', error);
+    }
+  }
+
+  private async askSeasonalRecommendations(currentMonth: string, nextMonth: string): Promise<string | null> {
+    const completion = await this.openai.chat.completions.create({
+      model: this.config.openAi.model,
+      messages: [
+        {
+          role: 'system',
+          content: 'Ты эксперт по туризму. Дай рекомендации для туристического бота.',
+        },
+        {
+          role: 'user',
+          content: `Какие направления для пляжного отдыха лучше всего подходят для россиян в ${currentMonth} и ${nextMonth}? ` +
+            'Перечисли 10-15 стран с кратким пояснением (погода, температура воды, особенности). Формат: "Страна — описание".',
+        },
+      ],
+      temperature: 0.3,
+      max_tokens: 800,
+    });
+
+    return completion.choices[0]?.message?.content ?? null;
   }
 
   private async askVisaFreeCountries(citizenship: string): Promise<string[]> {

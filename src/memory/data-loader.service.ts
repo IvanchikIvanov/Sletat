@@ -6,7 +6,9 @@ export type DataLoaderJobType =
   | 'load-sletat-dictionaries'
   | 'load-visa-free'
   | 'enrich-countries'
-  | 'cleanup-expired';
+  | 'cleanup-expired'
+  | 'load-showcase-review'
+  | 'load-seasonal-recommendations';
 
 @Injectable()
 export class DataLoaderService {
@@ -27,6 +29,8 @@ export class DataLoaderService {
     this.scheduleJob('load-visa-free', 7 * 24 * 60 * 60 * 1000, 30_000);
     this.scheduleJob('enrich-countries', 7 * 24 * 60 * 60 * 1000, 60_000);
     this.scheduleJob('cleanup-expired', 24 * 60 * 60 * 1000, 5_000);
+    this.scheduleJob('load-showcase-review', 60 * 60 * 1000, 15_000);
+    this.scheduleJob('load-seasonal-recommendations', 7 * 24 * 60 * 60 * 1000, 120_000);
   }
 
   async triggerJob(type: DataLoaderJobType): Promise<void> {

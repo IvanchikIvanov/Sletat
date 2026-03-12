@@ -6,6 +6,10 @@ import { User } from '@prisma/client';
 export class UserRepository {
   constructor(private readonly prisma: PrismaService) {}
 
+  findById(id: string): Promise<User | null> {
+    return this.prisma.user.findUnique({ where: { id } });
+  }
+
   findByTelegramId(telegramId: string): Promise<User | null> {
     return this.prisma.user.findUnique({ where: { telegramId } });
   }

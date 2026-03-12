@@ -131,6 +131,15 @@ export class OpenAiService {
         'Если пользователь хочет изменить ранее указанное поле — используй новое значение.\n\n';
     }
 
+    if (memoryContext?.userDefaults && Object.keys(memoryContext.userDefaults).length > 0) {
+      prompt +=
+        'ДЕФОЛТЫ ИЗ ПОСЛЕДНЕГО ПОИСКА (подставляй если пользователь не указал явно):\n' +
+        JSON.stringify(memoryContext.userDefaults, null, 2) + '\n' +
+        'ВАЖНО: если пользователь НЕ указал город вылета, но в дефолтах есть departureCityCode — ' +
+        'используй его и НЕ переспрашивай. Упомяни в clarificationMessage только если нужно подтвердить.\n' +
+        'Если пользователь явно указал другое значение — используй его, а не дефолт.\n\n';
+    }
+
     if (memoryContext?.userPreferences?.length) {
       prompt +=
         'ПРЕДПОЧТЕНИЯ ПОЛЬЗОВАТЕЛЯ (из прошлых поисков):\n' +

@@ -37,6 +37,13 @@ export class SearchProfileRepository {
     });
   }
 
+  findLatestByUser(userId: string): Promise<SearchProfile | null> {
+    return this.prisma.searchProfile.findFirst({
+      where: { userId, isActive: true },
+      orderBy: { updatedAt: 'desc' },
+    });
+  }
+
   async upsertForUser(input: UpsertSearchProfileInput): Promise<SearchProfile> {
     const { userId, name, childrenAges, ...rest } = input;
 

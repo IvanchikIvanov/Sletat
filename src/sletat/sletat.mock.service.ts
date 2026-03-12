@@ -5,6 +5,7 @@ import {
   SletatDictionaryItem,
   SletatNormalizedRequest,
   SletatSearchOffer,
+  SletatShowcaseItem,
 } from './sletat.types';
 import { ParsedTourRequest } from '../openai/dto/tour-request.schema';
 
@@ -163,6 +164,21 @@ export class SletatMockService implements SletatClient {
       {
         url: `https://example.com/mock-payment/${claimId}`,
         type: 'card',
+      },
+    ];
+  }
+
+  async loadShowcaseReview(_townFromId?: number, _currencyAlias?: string): Promise<SletatShowcaseItem[]> {
+    return [
+      {
+        countryId: '10',
+        countryName: 'Турция',
+        hotelName: 'Mock Hotel 5*',
+        starName: '5*',
+        resortName: 'Анталья',
+        mealName: 'AI',
+        minPrice: '45000 RUB',
+        nights: 7,
       },
     ];
   }
