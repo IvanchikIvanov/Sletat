@@ -1,5 +1,5 @@
-import { Ctx, Help, On, Start, Update, Action, Command } from 'nestjs-telegraf';
-import { Context } from 'telegraf';
+import { Ctx, Help, On, Start, Update, Action, Command, InjectBot } from 'nestjs-telegraf';
+import { Context, Telegraf } from 'telegraf';
 import { OpenAiService } from '../openai/openai.service';
 import { UserRepository } from '../persistence/repositories/user.repository';
 import { SearchService } from '../search/search.service';
@@ -33,7 +33,11 @@ function inferCountryFromCity(city: string): string | null {
 
 @Update()
 export class TelegramUpdate {
+  private botId: number | null = null;
+  private botUsername: string | null = null;
+
   constructor(
+    @InjectBot() private readonly bot: Telegraf,
     private readonly openAi: OpenAiService,
     private readonly users: UserRepository,
     private readonly search: SearchService,
@@ -43,7 +47,47 @@ export class TelegramUpdate {
     private readonly dialogCtx: DialogContextService,
     private readonly memory: MemoryService,
     private readonly sletat: SletatService,
-  ) {}
+  ) {
+    this.bot.telegram.getMe().then((me) => {
+      this.botId = me.id;
+      this.botUsername = me.username?.toLowerCase() ?? null;
+    }).catch(() => {});
+  }
+
+  private isGroupChat(ctx: Context): boolean {
+    const chatType = ctx.chat?.type;
+    return chatType === 'group' || chatType === 'supergroup';
+  }
+
+  private isBotMentioned(ctx: Context, text: string): boolean {
+    if (!this.isGroupChat(ctx)) return true;
+
+    const msg = ctx.message;
+    if (msg && 'reply_to_message' in msg && msg.reply_to_message) {
+      const replyFrom = msg.reply_to_message.from;
+      if (replyFrom && this.botId && replyFrom.id === this.botId) return true;
+    }
+
+    if (this.botUsername && text.toLowerCase().includes(`@${this.botUsername}`)) {
+      return true;
+    }
+
+    if (msg && 'entities' in msg && msg.entities) {
+      for (const entity of msg.entities) {
+        if (entity.type === 'mention') {
+          const mention = text.slice(entity.offset, entity.offset + entity.length).toLowerCase();
+          if (this.botUsername && mention === `@${this.botUsername}`) return true;
+        }
+      }
+    }
+
+    return false;
+  }
+
+  private stripBotMention(text: string): string {
+    if (!this.botUsername) return text;
+    return text.replace(new RegExp(`@${this.botUsername}`, 'gi'), '').trim();
+  }
 
   @Start()
   async onStart(@Ctx() ctx: Context) {
@@ -182,7 +226,13 @@ export class TelegramUpdate {
   @On('text')
   async onText(@Ctx() ctx: Context) {
     if (!ctx.message || !('text' in ctx.message)) return;
-    const text = ctx.message.text;
+    const rawText = ctx.message.text;
+
+    if (!this.isBotMentioned(ctx, rawText)) return;
+
+    const text = this.stripBotMention(rawText);
+    if (!text) return;
+
     const user = await this.ensureUser(ctx);
 
     const previous = await this.dialogCtx.get(user.id);
@@ -220,6 +270,13 @@ export class TelegramUpdate {
   @On('voice')
   async onVoice(@Ctx() ctx: Context) {
     if (!ctx.message || !('voice' in ctx.message)) return;
+
+    if (this.isGroupChat(ctx)) {
+      const msg = ctx.message;
+      const isReplyToBot = 'reply_to_message' in msg && msg.reply_to_message?.from?.id === this.botId;
+      if (!isReplyToBot) return;
+    }
+
     const user = await this.ensureUser(ctx);
 
     const fileId = ctx.message.voice.file_id;
