@@ -242,11 +242,27 @@ export class DataLoaderProcessor {
     const departures = await this.sletat.getDepartureCities();
     let totalSaved = 0;
 
-    for (const template of templateList.slice(0, 3)) {
+    for (const template of templateList.slice(0, 5)) {
       const dep = departures.find((d) => d.name === template.departureCity);
       const townFromId = dep ? Number(dep.id) : 832;
 
-      for (const countryId of POPULAR_COUNTRY_IDS) {
+      const showcase = await this.sletat.getShowcaseReview(townFromId, 'RUB', template.name);
+      const countriesToLoad = showcase.length > 0
+        ? showcase
+        : (await this.sletat.getCountriesForShowcase(townFromId, template.name)).map((c) => ({
+            countryId: c.id,
+            countryName: c.name,
+          }));
+
+      if (!countriesToLoad.length) {
+        this.logger.debug(`No countries for template ${template.name}, townFromId=${townFromId}`);
+        continue;
+      }
+
+      for (const country of countriesToLoad) {
+        const countryId = Number(country.countryId);
+        if (!countryId) continue;
+
         try {
           const offers = await this.sletat.searchHotToursBulk({
             cityFromId: townFromId,
@@ -257,7 +273,7 @@ export class DataLoaderProcessor {
 
           const deals = offers.map((o) => ({
             countryId: String(countryId),
-            countryName: o.countryName ?? '',
+            countryName: o.countryName ?? country.countryName ?? '',
             hotelName: o.hotelName ?? null,
             starName: null,
             resortName: o.resortName ?? null,

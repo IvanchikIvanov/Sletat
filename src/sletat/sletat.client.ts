@@ -25,7 +25,9 @@ export interface SletatClient {
 
   getPayments(claimId: string): Promise<{ url: string; type: string }[]>;
 
-  loadShowcaseReview(townFromId?: number, currencyAlias?: string): Promise<SletatShowcaseItem[]>;
+  loadShowcaseReview(townFromId?: number, currencyAlias?: string, templateName?: string): Promise<SletatShowcaseItem[]>;
+
+  loadCountriesForShowcase(townFromId: number, templateName?: string): Promise<SletatDictionaryItem[]>;
 
   loadTemplates(templatesList?: string, type?: number): Promise<Array<{ id: number; name: string; departureCity: string }>>;
 }

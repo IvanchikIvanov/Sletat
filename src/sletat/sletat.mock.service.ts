@@ -201,7 +201,11 @@ export class SletatMockService implements SletatClient {
     return [{ id: 1, name: 'Горящие туры (Москва)', departureCity: 'Москва' }];
   }
 
-  async loadShowcaseReview(_townFromId?: number, _currencyAlias?: string): Promise<SletatShowcaseItem[]> {
+  async loadCountriesForShowcase(_townFromId: number, _templateName?: string): Promise<SletatDictionaryItem[]> {
+    return this.loadCountries();
+  }
+
+  async loadShowcaseReview(_townFromId?: number, _currencyAlias?: string, _templateName?: string): Promise<SletatShowcaseItem[]> {
     return [
       {
         countryId: '10',

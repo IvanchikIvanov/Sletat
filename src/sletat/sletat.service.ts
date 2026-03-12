@@ -74,11 +74,16 @@ export class SletatService implements OnModuleInit {
     return this.client.loadTemplates(templatesList, type);
   }
 
-  async getShowcaseReview(townFromId = 832, currencyAlias = 'RUB'): Promise<SletatShowcaseItem[]> {
+  async getShowcaseReview(townFromId = 832, currencyAlias = 'RUB', templateName?: string): Promise<SletatShowcaseItem[]> {
+    const cacheKey = `sletat:showcase:${townFromId}:${currencyAlias}:${templateName ?? 'default'}`;
     return this.getCached(
-      `sletat:showcase:${townFromId}:${currencyAlias}`,
-      () => this.client.loadShowcaseReview(townFromId, currencyAlias),
+      cacheKey,
+      () => this.client.loadShowcaseReview(townFromId, currencyAlias, templateName),
     );
+  }
+
+  async getCountriesForShowcase(townFromId: number, templateName?: string): Promise<SletatDictionaryItem[]> {
+    return this.client.loadCountriesForShowcase(townFromId, templateName);
   }
 
   // ─── Горящие туры (из БД) ───

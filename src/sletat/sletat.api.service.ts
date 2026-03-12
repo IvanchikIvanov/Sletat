@@ -108,14 +108,18 @@ export class SletatApiService implements SletatClient {
     })).filter((t) => t.id > 0 && t.name);
   }
 
-  async loadShowcaseReview(townFromId = 832, currencyAlias = 'RUB'): Promise<SletatShowcaseItem[]> {
-    const payload = await this.callSearchApi('SLETAT_ENDPOINT_SHOWCASE_REVIEW', this.config.sletat.protocol, {
-      townFromId,
-      currencyAlias,
-      countryToursCount: 1,
-      showcase: 1,
-    });
+  async loadShowcaseReview(townFromId = 832, currencyAlias = 'RUB', templateName?: string): Promise<SletatShowcaseItem[]> {
+    const params: Record<string, unknown> = { townFromId, currencyAlias, countryToursCount: 1, showcase: 1 };
+    if (templateName) params.templateName = templateName;
+    const payload = await this.callSearchApi('SLETAT_ENDPOINT_SHOWCASE_REVIEW', this.config.sletat.protocol, params);
     return this.mapShowcase(payload);
+  }
+
+  async loadCountriesForShowcase(townFromId: number, templateName?: string): Promise<SletatDictionaryItem[]> {
+    const params: Record<string, unknown> = { townFromId, showcase: 1 };
+    if (templateName) params.templateName = templateName;
+    const payload = await this.callSearchApi('SLETAT_ENDPOINT_COUNTRIES', this.config.sletat.protocol, params);
+    return this.mapDictionary(payload, ['GetCountriesResult', 'countries', 'CountryList']);
   }
 
   async normalizeRequest(parsed: ParsedTourRequest): Promise<SletatNormalizedRequest> {
@@ -201,12 +205,22 @@ export class SletatApiService implements SletatClient {
     return offers;
   }
 
-  /** Массовая выгрузка: GetTours с pageSize=2500, GetLoadState, пагинация */
+  private readonly BULK_CAP = 2500;
+
+  /** Массовая выгрузка: GetTours + GetLoadState, пагинация, авто-дробление при total >= 2500 */
   async searchToursBulk(
     request: SletatNormalizedRequest,
     opts?: { pageSize?: number },
   ): Promise<SletatSearchOffer[]> {
-    const pageSize = opts?.pageSize ?? 2500;
+    return this.searchToursBulkInternal(request, opts ?? {}, 0);
+  }
+
+  private async searchToursBulkInternal(
+    request: SletatNormalizedRequest,
+    opts: { pageSize?: number },
+    depth: number,
+  ): Promise<SletatSearchOffer[]> {
+    const pageSize = opts.pageSize ?? 2500;
     const baseParams = this.toSearchParams(request);
     const params = { ...baseParams, pageSize, pageNumber: 1, updateResult: 0 };
 
@@ -216,9 +230,8 @@ export class SletatApiService implements SletatClient {
       params,
     );
 
-    let requestId = this.extractRequestId(firstPayload);
+    const requestId = this.extractRequestId(firstPayload);
     if (!requestId) {
-      this.logger.warn('No requestId in GetTours bulk response');
       return this.mapOffers(firstPayload);
     }
 
@@ -235,6 +248,7 @@ export class SletatApiService implements SletatClient {
       if (allProcessed || hasRows) {
         const allOffers: SletatSearchOffer[] = [];
         let pageNumber = 1;
+        let lastTotal = 0;
 
         for (;;) {
           const resultPayload = await this.callSearchApi(
@@ -246,8 +260,27 @@ export class SletatApiService implements SletatClient {
           allOffers.push(...this.attachRequestId(pageOffers, requestId));
 
           const total = this.extractTotalRecords(resultPayload);
-          if (pageOffers.length < pageSize || allOffers.length >= (total ?? 0)) break;
+          lastTotal = total ?? 0;
+          if (pageOffers.length < pageSize || allOffers.length >= lastTotal) break;
           pageNumber++;
+        }
+
+        if (lastTotal >= this.BULK_CAP && depth < 3) {
+          const split = this.trySplitSlice(request, lastTotal, depth);
+          if (split) {
+            const [reqA, reqB] = split;
+            const [offersA, offersB] = await Promise.all([
+              this.searchToursBulkInternal(reqA, opts, depth + 1),
+              this.searchToursBulkInternal(reqB, opts, depth + 1),
+            ]);
+            const seen = new Set<string>();
+            return [...offersA, ...offersB].filter((o) => {
+              const key = `${o.externalOfferId}-${o.sourceId}`;
+              if (seen.has(key)) return false;
+              seen.add(key);
+              return true;
+            });
+          }
         }
 
         return allOffers;
@@ -258,7 +291,64 @@ export class SletatApiService implements SletatClient {
     return [];
   }
 
-  /** Массовая выгрузка горящих: GetTours с s_showcase=true, templateName */
+  private parseRuDate(s: string): Date {
+    const [d, m, y] = s.split(/[./]/).map(Number);
+    return new Date(y, (m ?? 1) - 1, d ?? 1);
+  }
+
+  private trySplitSlice(
+    request: SletatNormalizedRequest,
+    total: number,
+    depth: number,
+  ): [SletatNormalizedRequest, SletatNormalizedRequest] | null {
+    const formatDate = (d: Date) =>
+      d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\./g, '/');
+
+    if (depth === 0 && request.dateFrom && request.dateTo) {
+      const from = this.parseRuDate(request.dateFrom);
+      const to = this.parseRuDate(request.dateTo);
+      const midTime = (from.getTime() + to.getTime()) / 2;
+      const mid = new Date(midTime);
+      const midNext = new Date(mid.getTime() + 86400000);
+      if (mid.getTime() <= from.getTime() || midNext.getTime() >= to.getTime()) return null;
+      this.logger.debug(`Bulk split by dates: ${formatDate(from)}-${formatDate(mid)} | ${formatDate(midNext)}-${formatDate(to)}`);
+      return [
+        { ...request, dateFrom: formatDate(from), dateTo: formatDate(mid) },
+        { ...request, dateFrom: formatDate(midNext), dateTo: formatDate(to) },
+      ];
+    }
+
+    if (depth === 1 && request.nightsFrom != null && request.nightsTo != null) {
+      const min = request.nightsFrom;
+      const max = request.nightsTo;
+      const mid = Math.floor((min + max) / 2);
+      if (mid <= min || mid + 1 > max) return null;
+      this.logger.debug(`Bulk split by nights: ${min}-${mid} | ${mid + 1}-${max}`);
+      return [
+        { ...request, nightsFrom: min, nightsTo: mid },
+        { ...request, nightsFrom: mid + 1, nightsTo: max },
+      ];
+    }
+
+    if (depth === 2 && request.dateFrom && request.dateTo) {
+      const from = this.parseRuDate(request.dateFrom);
+      const to = this.parseRuDate(request.dateTo);
+      const third = (to.getTime() - from.getTime()) / 3;
+      const m1 = new Date(from.getTime() + third);
+      const m2 = new Date(from.getTime() + 2 * third);
+      const m2Next = new Date(m2.getTime() + 86400000);
+      if (m1.getTime() <= from.getTime() || m2Next.getTime() >= to.getTime()) return null;
+      this.logger.debug(`Bulk split by dates (depth 2): finer ranges`);
+      return [
+        { ...request, dateFrom: formatDate(from), dateTo: formatDate(m1) },
+        { ...request, dateFrom: formatDate(m2Next), dateTo: formatDate(to) },
+      ];
+    }
+
+    return null;
+  }
+
+  /** Массовая выгрузка горящих: GetTours с s_showcase=true, templateName. Без GetLoadState — данные из кеша. */
   async searchHotToursBulk(params: {
     cityFromId: number;
     countryId: number;
@@ -291,44 +381,27 @@ export class SletatApiService implements SletatClient {
 
     const requestId = this.extractRequestId(firstPayload);
     if (!requestId) {
-      this.logger.warn('No requestId in GetTours hot bulk response');
       return this.mapOffers(firstPayload);
     }
 
-    const pollDelayMs = 1500;
-    const maxWaitMs = 90_000;
-    const start = Date.now();
+    const allOffers: SletatSearchOffer[] = [];
+    let pageNumber = 1;
 
-    while (Date.now() - start < maxWaitMs) {
-      await this.sleep(pollDelayMs);
-      const loadState = await this.getLoadState(requestId);
-      const allProcessed = loadState.length > 0 && loadState.every((s) => s.IsProcessed);
-      const hasRows = loadState.some((s) => s.RowsCount > 0);
+    for (;;) {
+      const resultPayload = await this.callSearchApi(
+        'SLETAT_ENDPOINT_SEARCH',
+        this.config.sletat.protocol,
+        { ...baseParams, requestId, updateResult: 1, pageSize, pageNumber },
+      );
+      const pageOffers = this.mapOffers(resultPayload);
+      allOffers.push(...this.attachRequestId(pageOffers, requestId));
 
-      if (allProcessed || hasRows) {
-        const allOffers: SletatSearchOffer[] = [];
-        let pageNumber = 1;
-
-        for (;;) {
-          const resultPayload = await this.callSearchApi(
-            'SLETAT_ENDPOINT_SEARCH',
-            this.config.sletat.protocol,
-            { ...baseParams, requestId, updateResult: 1, pageSize, pageNumber },
-          );
-          const pageOffers = this.mapOffers(resultPayload);
-          allOffers.push(...this.attachRequestId(pageOffers, requestId));
-
-          const total = this.extractTotalRecords(resultPayload);
-          if (pageOffers.length < pageSize || allOffers.length >= (total ?? 0)) break;
-          pageNumber++;
-        }
-
-        return allOffers;
-      }
+      const total = this.extractTotalRecords(resultPayload);
+      if (pageOffers.length < pageSize || allOffers.length >= (total ?? 0)) break;
+      pageNumber++;
     }
 
-    this.logger.warn('Hot bulk search timeout');
-    return [];
+    return allOffers;
   }
 
   private extractTotalRecords(payload: Record<string, unknown>): number | undefined {
