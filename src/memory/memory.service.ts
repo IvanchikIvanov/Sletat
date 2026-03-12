@@ -38,11 +38,14 @@ export class MemoryService {
 
   private async getDbCacheSummary(): Promise<string | null> {
     try {
-      const [departures, countries, hotDeals] = await Promise.all([
+      const [departures, countries] = await Promise.all([
         this.cache.getAllDepartureCities(),
         this.cache.getCountries(),
-        this.cache.getHotDeals(832),
       ]);
+      const popularDep = departures.find((d) => d.isPopular);
+      const hotDeals = popularDep
+        ? await this.cache.getHotDeals(Number(popularDep.id))
+        : [];
 
       if (!departures.length && !countries.length) return null;
 

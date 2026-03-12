@@ -78,7 +78,11 @@ export class TelegramUpdate {
       'Можешь просто наговорить запрос голосом — я пойму!\n\n' +
 
       '👀 МОНИТОРИНГ ЦЕН\n' +
-      'Нашёл тур, но хочешь подождать скидку? Нажми «Следить» — я буду мониторить цену и сообщу, когда она упадёт.\n\n' +
+      'Хочешь следить за ценой? Просто скажи:\n' +
+      '• «Мониторь Турцию из Москвы на июль»\n' +
+      '• «Следи за ценами в Египет»\n' +
+      '• «Сообщи когда подешевеет»\n' +
+      'Или нажми кнопку «Следить» после поиска. Я буду проверять цены и сообщу о скидках!\n\n' +
 
       '🧠 Я ЗАПОМИНАЮ\n' +
       'Я помню твой город вылета, предпочтения и прошлые поиски. Чем больше общаемся — тем точнее подбираю.\n\n' +
@@ -107,11 +111,30 @@ export class TelegramUpdate {
 
   @Command('hot')
   async onHot(@Ctx() ctx: Context) {
-    await this.ensureUser(ctx);
+    const user = await this.ensureUser(ctx);
 
-    const dbDeals = await this.sletat.getHotDealsFromDb(832);
+    const depCity = await this.resolveUserDepartureCity(user.id);
+    if (!depCity) {
+      await this.dialogCtx.save(user.id, {
+        parsed: {},
+        messages: [],
+        lastClarification: '__awaiting_departure_for_hot__',
+        updatedAt: new Date().toISOString(),
+      });
+      await ctx.reply(
+        'Из какого города ты вылетаешь? ✈️\n' +
+        'Напиши, например: Москва, Санкт-Петербург, Казань...',
+      );
+      return;
+    }
+
+    await this.sendHotDeals(ctx, depCity.id, depCity.name);
+  }
+
+  private async sendHotDeals(ctx: Context, depCityId: string, depCityName: string) {
+    const dbDeals = await this.sletat.getHotDealsFromDb(Number(depCityId));
     if (dbDeals.length > 0) {
-      const lines = ['🔥 Горящие туры из Москвы:', ''];
+      const lines = [`🔥 Горящие туры из ${depCityName}:`, ''];
       for (const d of dbDeals.slice(0, 15)) {
         const parts: string[] = [];
         if (d.hotelName) parts.push(d.hotelName);
@@ -128,7 +151,16 @@ export class TelegramUpdate {
     }
 
     const items = await this.sletat.getHotDealsAll();
-    await this.telegram.sendShowcaseResults(ctx.chat!.id, items, '🔥 Горящие туры из Москвы:');
+    await this.telegram.sendShowcaseResults(ctx.chat!.id, items, `🔥 Горящие туры из ${depCityName}:`);
+  }
+
+  private async resolveUserDepartureCity(userId: string): Promise<{ id: string; name: string } | null> {
+    const profile = await this.memory.getUserDefaults(userId);
+    if (profile?.departureCityCode) {
+      const name = profile.departureCity ?? profile.departureCityCode;
+      return { id: profile.departureCityCode, name };
+    }
+    return null;
   }
 
   @Command('subscriptions')
@@ -152,6 +184,35 @@ export class TelegramUpdate {
     if (!ctx.message || !('text' in ctx.message)) return;
     const text = ctx.message.text;
     const user = await this.ensureUser(ctx);
+
+    const previous = await this.dialogCtx.get(user.id);
+    if (previous?.lastClarification === '__awaiting_departure_for_hot__') {
+      await this.dialogCtx.clear(user.id);
+      const depCity = await this.sletat.findDepartureCityInDb(text.trim());
+      if (!depCity) {
+        await ctx.reply(
+          `Не нашёл город «${text.trim()}» в списке доступных. Попробуй ещё раз или напиши /hot позже.`,
+        );
+        return;
+      }
+      this.memory.extractFactsFromMessage(user.id, `Мой город вылета: ${depCity.name}`).catch(() => {});
+      await this.sendHotDeals(ctx, depCity.id, depCity.name);
+      return;
+    }
+
+    if (previous?.lastClarification === '__awaiting_departure_for_monitor__') {
+      await this.dialogCtx.clear(user.id);
+      const depCity = await this.sletat.findDepartureCityInDb(text.trim());
+      if (!depCity) {
+        await ctx.reply(
+          `Не нашёл город «${text.trim()}». Попробуй ещё раз или напиши запрос заново.`,
+        );
+        return;
+      }
+      this.memory.extractFactsFromMessage(user.id, `Мой город вылета: ${depCity.name}`).catch(() => {});
+      await ctx.reply(`Запомнил — вылет из ${depCity.name}. Теперь напиши, что хочешь мониторить 👀`);
+      return;
+    }
 
     await this.handleTourRequest(ctx, user.id, text);
   }
@@ -206,6 +267,59 @@ export class TelegramUpdate {
     );
 
     this.memory.extractFactsFromMessage(userId, text).catch(() => {});
+
+    const intent = response.intent ?? 'search';
+
+    if (intent === 'hot') {
+      const depCity = await this.resolveUserDepartureCity(userId);
+      if (depCity) {
+        await this.dialogCtx.clear(userId);
+        await this.sendHotDeals(ctx, depCity.id, depCity.name);
+        return;
+      }
+      if (response.parsed.departureCity) {
+        const found = await this.sletat.findDepartureCityInDb(response.parsed.departureCity);
+        if (found) {
+          await this.dialogCtx.clear(userId);
+          this.memory.extractFactsFromMessage(userId, `Мой город вылета: ${found.name}`).catch(() => {});
+          await this.sendHotDeals(ctx, found.id, found.name);
+          return;
+        }
+      }
+      await this.dialogCtx.save(userId, {
+        parsed: response.parsed,
+        messages: [],
+        lastClarification: '__awaiting_departure_for_hot__',
+        updatedAt: new Date().toISOString(),
+      });
+      await ctx.reply(
+        response.clarificationMessage ??
+        'Из какого города ты вылетаешь? ✈️\nНапиши, например: Москва, Санкт-Петербург, Казань...',
+      );
+      return;
+    }
+
+    if (intent === 'chat') {
+      const mergedParsed = previous
+        ? this.dialogCtx.mergeParsed(previous.parsed, response.parsed)
+        : response.parsed;
+
+      const messages = previous?.messages ? [...previous.messages] : [];
+      messages.push({ role: 'user', content: text });
+      if (response.clarificationMessage) {
+        messages.push({ role: 'assistant', content: response.clarificationMessage });
+      }
+
+      await this.dialogCtx.save(userId, {
+        parsed: mergedParsed,
+        messages,
+        lastClarification: response.clarificationMessage,
+        updatedAt: new Date().toISOString(),
+      });
+
+      await ctx.reply(response.clarificationMessage ?? 'Расскажи подробнее, чем могу помочь? 😊');
+      return;
+    }
 
     if (!response.readyToSearch && response.clarificationMessage) {
       const mergedParsed = previous
@@ -263,6 +377,21 @@ export class TelegramUpdate {
       if (country) {
         this.users.updateDefaultCountry(userId, country).catch(() => {});
       }
+    }
+
+    if (intent === 'monitor' && result.profileId) {
+      const sub = await this.subscriptions.enableSubscriptionForProfile({
+        userId,
+        profileId: result.profileId,
+        priceDropThresholdPercent: 15,
+        maxNotificationsPerDay: 5,
+      });
+      await this.telegram.sendSearchResults(ctx.chat!.id, result);
+      await ctx.reply(
+        `👀 Мониторинг включён для "${sub.profileName}"!\n` +
+        'Буду следить за ценами и сообщу, когда появится выгодное предложение.',
+      );
+      return;
     }
 
     await this.telegram.sendSearchResults(ctx.chat!.id, result);

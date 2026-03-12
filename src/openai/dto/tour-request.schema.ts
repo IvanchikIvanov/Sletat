@@ -1,10 +1,10 @@
 export type DestinationMode = 'specific' | 'visa_free' | 'any';
+export type UserIntent = 'search' | 'monitor' | 'hot' | 'chat';
 
 export interface ParsedTourRequest {
   departureCity?: string;
   country?: string;
   resort?: string;
-  /** Режим назначения: конкретная страна, без визы, или любая */
   destinationMode?: DestinationMode;
   hotelCategory?: string;
   mealType?: string;
@@ -23,6 +23,7 @@ export interface ParsedTourRequest {
 
 export interface ParseTourResponse {
   readyToSearch: boolean;
+  intent?: UserIntent;
   clarificationMessage?: string;
   parsed: ParsedTourRequest;
 }
