@@ -74,16 +74,18 @@ export class DataLoaderProcessor {
         mealCount++;
       }
 
+      const seenCountryIds = new Set<string>();
       let countryCount = 0;
       for (const depId of POPULAR_DEPARTURE_IDS) {
         try {
           const countries = await this.sletat.getCountriesForCity(depId);
           for (const country of countries) {
+            if (seenCountryIds.has(country.id)) continue;
+            seenCountryIds.add(country.id);
             await this.cache.upsertCountry({
               id: country.id,
               name: country.name,
               alias: country.code,
-              townFromId: depId,
             });
             countryCount++;
           }

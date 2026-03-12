@@ -25,10 +25,11 @@ export class CacheRepository {
     isDefault?: boolean;
     isPopular?: boolean;
   }): Promise<void> {
+    const { id, name, countryId, isDefault, isPopular } = data;
     await this.prisma.cachedDepartureCity.upsert({
-      where: { id: data.id },
-      create: { ...data, fetchedAt: new Date() },
-      update: { ...data, fetchedAt: new Date() },
+      where: { id },
+      create: { id, name, countryId: countryId ?? null, isDefault: isDefault ?? false, isPopular: isPopular ?? false, fetchedAt: new Date() },
+      update: { name, countryId: countryId ?? undefined, isDefault: isDefault ?? undefined, isPopular: isPopular ?? undefined, fetchedAt: new Date() },
     });
   }
 
@@ -51,32 +52,27 @@ export class CacheRepository {
     isVisa?: boolean;
     flags?: number;
     rank?: number;
-    townFromId?: number;
   }): Promise<void> {
-    const townFromId = data.townFromId ?? 832;
+    const { id, name, alias, isVisa, flags, rank } = data;
     await this.prisma.cachedCountry.upsert({
-      where: { id_townFromId: { id: data.id, townFromId } },
-      create: { ...data, townFromId, fetchedAt: new Date() },
-      update: { ...data, townFromId, fetchedAt: new Date() },
+      where: { id },
+      create: { id, name, alias: alias ?? null, isVisa: isVisa ?? false, flags: flags ?? 0, rank: rank ?? 0, fetchedAt: new Date() },
+      update: { name, alias: alias ?? undefined, isVisa: isVisa ?? undefined, flags: flags ?? undefined, rank: rank ?? undefined, fetchedAt: new Date() },
     });
   }
 
-  async getCountries(townFromId = 832): Promise<CachedCountry[]> {
-    return this.prisma.cachedCountry.findMany({
-      where: { townFromId },
-      orderBy: { name: 'asc' },
-    });
+  async getCountries(): Promise<CachedCountry[]> {
+    return this.prisma.cachedCountry.findMany({ orderBy: { name: 'asc' } });
   }
 
-  async findCountryByName(name: string, townFromId = 832): Promise<CachedCountry | null> {
+  async findCountryByName(name: string): Promise<CachedCountry | null> {
     const lower = name.trim().toLowerCase();
-    const all = await this.getCountries(townFromId);
+    const all = await this.getCountries();
     return all.find((c) => c.name.toLowerCase() === lower || c.alias?.toLowerCase() === lower) ?? null;
   }
 
-  async getCountryFreshness(townFromId = 832): Promise<Date | null> {
+  async getCountryFreshness(): Promise<Date | null> {
     const first = await this.prisma.cachedCountry.findFirst({
-      where: { townFromId },
       orderBy: { fetchedAt: 'desc' },
       select: { fetchedAt: true },
     });
@@ -92,10 +88,11 @@ export class CacheRepository {
     isPopular?: boolean;
     parentId?: string;
   }): Promise<void> {
+    const { id, name, countryId, isPopular, parentId } = data;
     await this.prisma.cachedResort.upsert({
-      where: { id: data.id },
-      create: { ...data, fetchedAt: new Date() },
-      update: { ...data, fetchedAt: new Date() },
+      where: { id },
+      create: { id, name, countryId, isPopular: isPopular ?? false, parentId: parentId ?? null, fetchedAt: new Date() },
+      update: { name, countryId, isPopular: isPopular ?? undefined, parentId: parentId ?? undefined, fetchedAt: new Date() },
     });
   }
 
@@ -133,10 +130,11 @@ export class CacheRepository {
     rating?: number;
     photosCount?: number;
   }): Promise<void> {
+    const { id, name, countryId, resortId, starId, starName, rating, photosCount } = data;
     await this.prisma.cachedHotel.upsert({
-      where: { id: data.id },
-      create: { ...data, fetchedAt: new Date() },
-      update: { ...data, fetchedAt: new Date() },
+      where: { id },
+      create: { id, name, countryId, resortId: resortId ?? null, starId: starId ?? null, starName: starName ?? null, rating: rating ?? null, photosCount: photosCount ?? 0, fetchedAt: new Date() },
+      update: { name, countryId, resortId: resortId ?? undefined, starId: starId ?? undefined, starName: starName ?? undefined, rating: rating ?? undefined, photosCount: photosCount ?? undefined, fetchedAt: new Date() },
     });
   }
 
@@ -152,7 +150,7 @@ export class CacheRepository {
     const where: Prisma.CachedHotelWhereInput = {};
     if (countryId) where.countryId = countryId;
     const hotels = await this.prisma.cachedHotel.findMany({ where });
-    return hotels.find((h) => h.name.toLowerCase().includes(lower)) ?? null;
+    return hotels.find((h: CachedHotel) => h.name.toLowerCase().includes(lower)) ?? null;
   }
 
   async getHotelFreshness(countryId: string): Promise<Date | null> {
@@ -173,8 +171,8 @@ export class CacheRepository {
   async upsertMeal(data: { id: string; name: string }): Promise<void> {
     await this.prisma.cachedMeal.upsert({
       where: { id: data.id },
-      create: { ...data, fetchedAt: new Date() },
-      update: { ...data, fetchedAt: new Date() },
+      create: { id: data.id, name: data.name, fetchedAt: new Date() },
+      update: { name: data.name, fetchedAt: new Date() },
     });
   }
 
@@ -227,7 +225,7 @@ export class CacheRepository {
         break;
       }
       case 'country':
-        fetchedAt = await this.getCountryFreshness(key ? Number(key) : 832);
+        fetchedAt = await this.getCountryFreshness();
         break;
       case 'resort':
         fetchedAt = key ? await this.getResortFreshness(key) : null;

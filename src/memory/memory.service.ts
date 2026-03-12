@@ -40,7 +40,7 @@ export class MemoryService {
     try {
       const [departures, countries, hotDeals] = await Promise.all([
         this.cache.getAllDepartureCities(),
-        this.cache.getCountries(832),
+        this.cache.getCountries(),
         this.cache.getHotDeals(832),
       ]);
 

@@ -238,15 +238,8 @@ model CachedCountry {
   isVisa       Boolean  @default(false)
   flags        Int      @default(0)
   rank         Int      @default(0)
-  townFromId   Int      @default(832)
   fetchedAt    DateTime @default(now())
 
-  resorts      CachedResort[]
-  hotels       CachedHotel[]
-  hotDeals     CachedHotDeal[]
-
-  @@unique([id, townFromId])
-  @@index([townFromId])
   @@index([name])
 }
 
@@ -257,9 +250,6 @@ model CachedResort {
   isPopular   Boolean  @default(false)
   parentId    String?
   fetchedAt   DateTime @default(now())
-
-  country     CachedCountry @relation(fields: [countryId], references: [id], onDelete: Cascade)
-  hotels      CachedHotel[]
 
   @@index([countryId])
   @@index([name])
@@ -275,9 +265,6 @@ model CachedHotel {
   rating      Float?
   photosCount Int      @default(0)
   fetchedAt   DateTime @default(now())
-
-  country     CachedCountry @relation(fields: [countryId], references: [id], onDelete: Cascade)
-  resort      CachedResort? @relation(fields: [resortId], references: [id], onDelete: SetNull)
 
   @@index([countryId])
   @@index([resortId])
@@ -300,8 +287,6 @@ model CachedHotDeal {
   offerId       String?
   townFromId    Int      @default(832)
   fetchedAt     DateTime @default(now())
-
-  country       CachedCountry @relation(fields: [countryId], references: [id], onDelete: Cascade)
 
   @@index([countryId])
   @@index([townFromId])

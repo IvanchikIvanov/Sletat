@@ -115,8 +115,8 @@ export class SletatService implements OnModuleInit {
 
   // ─── Поиск по БД-кэшу ───
 
-  async findCountryInDb(name: string, townFromId = 832) {
-    return this.cache.findCountryByName(name, townFromId);
+  async findCountryInDb(name: string) {
+    return this.cache.findCountryByName(name);
   }
 
   async findResortInDb(name: string, countryId: string) {
