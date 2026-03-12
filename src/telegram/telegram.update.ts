@@ -18,6 +18,10 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as https from 'https';
 import { IncomingMessage } from 'http';
+import ffmpeg from 'fluent-ffmpeg';
+import ffmpegInstaller from '@ffmpeg-installer/ffmpeg';
+
+(ffmpeg as any).setFfmpegPath(ffmpegInstaller.path);
 
 /** Определить страну по городу вылета (для обновления defaultCountry) */
 function inferCountryFromCity(city: string): string | null {
@@ -342,10 +346,25 @@ export class TelegramUpdate {
         .on('error', (err: Error) => reject(err));
     });
 
-    const text = await this.openAi.transcribeVoice(tmpPath);
-    await ctx.reply(`Распознал: "${text}"`);
-
-    await this.handleTourRequest(ctx, user.id, text);
+    const mp3Path = tmpPath.replace(/\.oga$/, '.mp3');
+    try {
+      await new Promise<void>((resolve, reject) => {
+        ffmpeg(tmpPath)
+          .toFormat('mp3')
+          .on('end', () => resolve())
+          .on('error', (err: Error) => reject(err))
+          .save(mp3Path);
+      });
+      const text = await this.openAi.transcribeVoice(mp3Path);
+      await ctx.reply(`Распознал: "${text}"`);
+      await this.handleTourRequest(ctx, user.id, text);
+    } catch (err) {
+      this.logger.error('Voice transcription failed', err as Error);
+      await ctx.reply('Не удалось распознать голос. Попробуй ещё раз или напиши текстом.');
+    } finally {
+      fs.unlink(tmpPath, () => {});
+      if (fs.existsSync(mp3Path)) fs.unlink(mp3Path, () => {});
+    }
   }
 
   private async handleTourRequest(
