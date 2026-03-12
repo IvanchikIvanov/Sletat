@@ -77,3 +77,18 @@ export interface SletatShowcaseItem {
   offerId?: string;
 }
 
+/** Элемент LoadState — статус обработки запроса туроператором */
+export interface SletatLoadStateItem {
+  Id: number;
+  Name: string;
+  IsProcessed: boolean;
+  RowsCount: number;
+}
+
+/** Шаблон горящих туров из GetTemplates */
+export interface SletatTemplateItem {
+  id: number;
+  name: string;
+  departureCity: string;
+}
+

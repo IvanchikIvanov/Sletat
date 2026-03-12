@@ -31,6 +31,8 @@ export function validateEnv(config: Record<string, unknown>) {
     SLETAT_ENDPOINT_HOTEL_STARS: Joi.string().default('GetHotelStars'),
     SLETAT_ENDPOINT_TOUR_OPERATORS: Joi.string().default('GetTourOperators'),
     SLETAT_ENDPOINT_SEARCH: Joi.string().default('GetTours'),
+    SLETAT_ENDPOINT_LOAD_STATE: Joi.string().default('GetLoadState'),
+    SLETAT_ENDPOINT_TEMPLATES: Joi.string().default('GetTemplates'),
     SLETAT_ENDPOINT_ACTUALIZE: Joi.string().default('ActualizePrice'),
     SLETAT_ENDPOINT_SHOWCASE_REVIEW: Joi.string().default('GetShowcaseReview'),
 

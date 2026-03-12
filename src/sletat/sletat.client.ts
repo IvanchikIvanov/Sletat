@@ -13,6 +13,10 @@ export interface SletatClient {
 
   searchTours(request: SletatNormalizedRequest): Promise<SletatSearchOffer[]>;
 
+  searchToursBulk(request: SletatNormalizedRequest, opts?: { pageSize?: number }): Promise<SletatSearchOffer[]>;
+
+  searchHotToursBulk(params: { cityFromId: number; countryId: number; templateName: string; pageSize?: number }): Promise<SletatSearchOffer[]>;
+
   actualizeOffer(params: { offerId: string; sourceId: string; requestId?: string }): Promise<SletatSearchOffer | null>;
 
   createClaim(offer: SletatSearchOffer, tourist: SletatOrderTourist): Promise<SletatClaimInfo>;
@@ -22,5 +26,7 @@ export interface SletatClient {
   getPayments(claimId: string): Promise<{ url: string; type: string }[]>;
 
   loadShowcaseReview(townFromId?: number, currencyAlias?: string): Promise<SletatShowcaseItem[]>;
+
+  loadTemplates(templatesList?: string, type?: number): Promise<Array<{ id: number; name: string; departureCity: string }>>;
 }
 

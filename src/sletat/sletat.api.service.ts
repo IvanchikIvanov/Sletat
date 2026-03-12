@@ -6,10 +6,12 @@ import {
   SletatClaimInfo,
   SletatDictionaryItem,
   SletatHotelItem,
+  SletatLoadStateItem,
   SletatNormalizedRequest,
   SletatOrderTourist,
   SletatSearchOffer,
   SletatShowcaseItem,
+  SletatTemplateItem,
 } from './sletat.types';
 import * as https from 'https';
 import * as http from 'http';
@@ -75,6 +77,37 @@ export class SletatApiService implements SletatClient {
     return this.mapDictionary(payload, ['GetHotelStarsResult', 'stars', 'hotelStars']);
   }
 
+  async getLoadState(requestId: string): Promise<SletatLoadStateItem[]> {
+    const payload = await this.callSearchApi('SLETAT_ENDPOINT_LOAD_STATE', this.config.sletat.protocol, {
+      requestId,
+    });
+    const raw = this.pickArray(payload, ['GetLoadStateResult', 'Data', 'LoadState']);
+    return raw.map((item) => ({
+      Id: Number(item.Id ?? item.id ?? 0),
+      Name: String(item.Name ?? item.name ?? ''),
+      IsProcessed: Boolean(item.IsProcessed ?? item.isProcessed ?? false),
+      RowsCount: Number(item.RowsCount ?? item.rowsCount ?? 0),
+    }));
+  }
+
+  async loadTemplates(templatesList = 'shared', type = 0): Promise<SletatTemplateItem[]> {
+    const payload = await this.callSearchApi('SLETAT_ENDPOINT_TEMPLATES', this.config.sletat.protocol, {
+      templatesList,
+      type,
+    });
+    const top = payload.GetTemplatesResult ?? payload;
+    const data = (top as Record<string, unknown>)?.Data ?? (top as Record<string, unknown>)?.data;
+    const templates = (data && typeof data === 'object' && 'templates' in data)
+      ? (data as Record<string, unknown>).templates
+      : Array.isArray(data) ? data : [];
+    if (!Array.isArray(templates)) return [];
+    return templates.map((t: Record<string, unknown>) => ({
+      id: Number(t.id ?? t.Id ?? 0),
+      name: String(t.name ?? t.Name ?? ''),
+      departureCity: String(t.departureCity ?? t.DepartureCity ?? ''),
+    })).filter((t) => t.id > 0 && t.name);
+  }
+
   async loadShowcaseReview(townFromId = 832, currencyAlias = 'RUB'): Promise<SletatShowcaseItem[]> {
     const payload = await this.callSearchApi('SLETAT_ENDPOINT_SHOWCASE_REVIEW', this.config.sletat.protocol, {
       townFromId,
@@ -137,28 +170,178 @@ export class SletatApiService implements SletatClient {
       return offers;
     }
 
-    this.logger.debug(`Polling with requestId=${requestId}`);
-    const maxAttempts = 5;
-    const pollDelayMs = 3000;
+    // По гайду: отслеживать статус только через GetLoadState (не GetTours)
+    const pollDelayMs = 1500;
+    const maxWaitMs = 120_000;
+    const start = Date.now();
 
-    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    while (Date.now() - start < maxWaitMs) {
       await this.sleep(pollDelayMs);
 
-      const pollPayload = await this.callSearchApi(
-        'SLETAT_ENDPOINT_SEARCH',
-        this.config.sletat.protocol,
-        { ...params, requestId, updateResult: 1 },
-      );
+      const loadState = await this.getLoadState(requestId);
+      const allProcessed = loadState.length > 0 && loadState.every((s) => s.IsProcessed);
+      const hasRows = loadState.some((s) => s.RowsCount > 0);
 
-      offers = this.mapOffers(pollPayload);
-      if (offers.length > 0) {
-        this.logger.debug(`Found ${offers.length} offers on poll attempt ${attempt + 1}`);
-        return this.attachRequestId(offers, requestId);
+      if (allProcessed || hasRows) {
+        const resultPayload = await this.callSearchApi(
+          'SLETAT_ENDPOINT_SEARCH',
+          this.config.sletat.protocol,
+          { ...params, requestId, updateResult: 1 },
+        );
+        offers = this.mapOffers(resultPayload);
+        if (offers.length > 0) {
+          this.logger.debug(`Found ${offers.length} offers after GetLoadState poll`);
+          return this.attachRequestId(offers, requestId);
+        }
+        if (allProcessed) break;
       }
     }
 
-    this.logger.warn(`No offers after ${maxAttempts} poll attempts`);
+    this.logger.warn('No offers after GetLoadState polling (timeout or empty result)');
     return offers;
+  }
+
+  /** Массовая выгрузка: GetTours с pageSize=2500, GetLoadState, пагинация */
+  async searchToursBulk(
+    request: SletatNormalizedRequest,
+    opts?: { pageSize?: number },
+  ): Promise<SletatSearchOffer[]> {
+    const pageSize = opts?.pageSize ?? 2500;
+    const baseParams = this.toSearchParams(request);
+    const params = { ...baseParams, pageSize, pageNumber: 1, updateResult: 0 };
+
+    const firstPayload = await this.callSearchApi(
+      'SLETAT_ENDPOINT_SEARCH',
+      this.config.sletat.protocol,
+      params,
+    );
+
+    let requestId = this.extractRequestId(firstPayload);
+    if (!requestId) {
+      this.logger.warn('No requestId in GetTours bulk response');
+      return this.mapOffers(firstPayload);
+    }
+
+    const pollDelayMs = 1500;
+    const maxWaitMs = 120_000;
+    const start = Date.now();
+
+    while (Date.now() - start < maxWaitMs) {
+      await this.sleep(pollDelayMs);
+      const loadState = await this.getLoadState(requestId);
+      const allProcessed = loadState.length > 0 && loadState.every((s) => s.IsProcessed);
+      const hasRows = loadState.some((s) => s.RowsCount > 0);
+
+      if (allProcessed || hasRows) {
+        const allOffers: SletatSearchOffer[] = [];
+        let pageNumber = 1;
+
+        for (;;) {
+          const resultPayload = await this.callSearchApi(
+            'SLETAT_ENDPOINT_SEARCH',
+            this.config.sletat.protocol,
+            { ...baseParams, requestId, updateResult: 1, pageSize, pageNumber },
+          );
+          const pageOffers = this.mapOffers(resultPayload);
+          allOffers.push(...this.attachRequestId(pageOffers, requestId));
+
+          const total = this.extractTotalRecords(resultPayload);
+          if (pageOffers.length < pageSize || allOffers.length >= (total ?? 0)) break;
+          pageNumber++;
+        }
+
+        return allOffers;
+      }
+    }
+
+    this.logger.warn('Bulk search timeout');
+    return [];
+  }
+
+  /** Массовая выгрузка горящих: GetTours с s_showcase=true, templateName */
+  async searchHotToursBulk(params: {
+    cityFromId: number;
+    countryId: number;
+    templateName: string;
+    pageSize?: number;
+  }): Promise<SletatSearchOffer[]> {
+    const pageSize = params.pageSize ?? 2500;
+    const baseParams = {
+      cityFromId: params.cityFromId,
+      countryId: params.countryId,
+      templateName: params.templateName,
+      s_showcase: 'true',
+      s_nightsMin: 3,
+      s_nightsMax: 14,
+      currencyAlias: 'RUB',
+      groupBy: 'hotel',
+      requestId: 0,
+      pageSize,
+      pageNumber: 1,
+      updateResult: 0,
+      includeDescriptions: 1,
+      includeOilTaxesAndVisa: 1,
+    };
+
+    const firstPayload = await this.callSearchApi(
+      'SLETAT_ENDPOINT_SEARCH',
+      this.config.sletat.protocol,
+      baseParams,
+    );
+
+    const requestId = this.extractRequestId(firstPayload);
+    if (!requestId) {
+      this.logger.warn('No requestId in GetTours hot bulk response');
+      return this.mapOffers(firstPayload);
+    }
+
+    const pollDelayMs = 1500;
+    const maxWaitMs = 90_000;
+    const start = Date.now();
+
+    while (Date.now() - start < maxWaitMs) {
+      await this.sleep(pollDelayMs);
+      const loadState = await this.getLoadState(requestId);
+      const allProcessed = loadState.length > 0 && loadState.every((s) => s.IsProcessed);
+      const hasRows = loadState.some((s) => s.RowsCount > 0);
+
+      if (allProcessed || hasRows) {
+        const allOffers: SletatSearchOffer[] = [];
+        let pageNumber = 1;
+
+        for (;;) {
+          const resultPayload = await this.callSearchApi(
+            'SLETAT_ENDPOINT_SEARCH',
+            this.config.sletat.protocol,
+            { ...baseParams, requestId, updateResult: 1, pageSize, pageNumber },
+          );
+          const pageOffers = this.mapOffers(resultPayload);
+          allOffers.push(...this.attachRequestId(pageOffers, requestId));
+
+          const total = this.extractTotalRecords(resultPayload);
+          if (pageOffers.length < pageSize || allOffers.length >= (total ?? 0)) break;
+          pageNumber++;
+        }
+
+        return allOffers;
+      }
+    }
+
+    this.logger.warn('Hot bulk search timeout');
+    return [];
+  }
+
+  private extractTotalRecords(payload: Record<string, unknown>): number | undefined {
+    const top = payload.GetToursResult ?? payload;
+    const data = (typeof top === 'object' && top !== null)
+      ? ((top as Record<string, unknown>).Data ?? (top as Record<string, unknown>).data ?? top)
+      : top;
+    if (typeof data === 'object' && data !== null) {
+      const d = data as Record<string, unknown>;
+      const total = d.iTotalDisplayRecords ?? d.iTotalRecords ?? d.totalRecords;
+      if (typeof total === 'number' && Number.isFinite(total)) return total;
+    }
+    return undefined;
   }
 
   private attachRequestId(offers: SletatSearchOffer[], requestId?: string): SletatSearchOffer[] {

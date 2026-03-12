@@ -9,7 +9,9 @@ export type DataLoaderJobType =
   | 'enrich-countries'
   | 'cleanup-expired'
   | 'load-showcase-review'
-  | 'load-seasonal-recommendations';
+  | 'load-seasonal-recommendations'
+  | 'load-bulk-regular'
+  | 'load-bulk-hot';
 
 @Injectable()
 export class DataLoaderService {
@@ -33,6 +35,8 @@ export class DataLoaderService {
     this.scheduleJob('cleanup-expired', 7 * 24 * 60 * 60 * 1000, 5_000);
     this.scheduleJob('load-showcase-review', 60 * 60 * 1000, 20_000);
     this.scheduleJob('load-seasonal-recommendations', 7 * 24 * 60 * 60 * 1000, 150_000);
+    this.scheduleJob('load-bulk-regular', 6 * 60 * 60 * 1000, 180_000);
+    this.scheduleJob('load-bulk-hot', 2 * 60 * 60 * 1000, 240_000);
   }
 
   async triggerJob(type: DataLoaderJobType): Promise<void> {

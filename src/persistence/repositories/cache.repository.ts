@@ -5,6 +5,7 @@ import {
   CachedResort,
   CachedHotel,
   CachedHotDeal,
+  CachedBulkTour,
   CachedDepartureCity,
   CachedMeal,
   Prisma,
@@ -211,6 +212,23 @@ export class CacheRepository {
       select: { fetchedAt: true },
     });
     return first?.fetchedAt ?? null;
+  }
+
+  // ─── Bulk Tours (массовая выгрузка обычных туров) ───
+
+  async replaceBulkToursForSlice(countryId: string, countryName: string, townFromId: number, tours: Omit<CachedBulkTour, 'id' | 'fetchedAt'>[]): Promise<number> {
+    await this.prisma.cachedBulkTour.deleteMany({ where: { countryId, townFromId } });
+    if (!tours.length) return 0;
+    const data = tours.map((t) => ({ ...t, fetchedAt: new Date() }));
+    const result = await this.prisma.cachedBulkTour.createMany({ data });
+    return result.count;
+  }
+
+  async getBulkTours(countryId?: string, townFromId?: number): Promise<CachedBulkTour[]> {
+    const where: Prisma.CachedBulkTourWhereInput = {};
+    if (countryId) where.countryId = countryId;
+    if (townFromId != null) where.townFromId = townFromId;
+    return this.prisma.cachedBulkTour.findMany({ where, orderBy: { price: 'asc' } });
   }
 
   // ─── Freshness check ───

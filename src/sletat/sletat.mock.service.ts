@@ -128,6 +128,16 @@ export class SletatMockService implements SletatClient {
     ];
   }
 
+  async searchToursBulk(_request: SletatNormalizedRequest, _opts?: { pageSize?: number }): Promise<SletatSearchOffer[]> {
+    this.logger.debug('Mock searchToursBulk: returning empty');
+    return [];
+  }
+
+  async searchHotToursBulk(_params: { cityFromId: number; countryId: number; templateName: string; pageSize?: number }): Promise<SletatSearchOffer[]> {
+    this.logger.debug('Mock searchHotToursBulk: returning empty');
+    return [];
+  }
+
   async actualizeOffer(params: {
     offerId: string;
     sourceId: string;
@@ -185,6 +195,10 @@ export class SletatMockService implements SletatClient {
         type: 'card',
       },
     ];
+  }
+
+  async loadTemplates(_templatesList?: string, _type?: number): Promise<Array<{ id: number; name: string; departureCity: string }>> {
+    return [{ id: 1, name: 'Горящие туры (Москва)', departureCity: 'Москва' }];
   }
 
   async loadShowcaseReview(_townFromId?: number, _currencyAlias?: string): Promise<SletatShowcaseItem[]> {

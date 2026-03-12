@@ -70,6 +70,10 @@ export class SletatService implements OnModuleInit {
     return this.getCached(`sletat:stars:${countryId}`, () => this.client.loadHotelStars(countryId));
   }
 
+  async getTemplates(templatesList = 'shared', type = 0): Promise<Array<{ id: number; name: string; departureCity: string }>> {
+    return this.client.loadTemplates(templatesList, type);
+  }
+
   async getShowcaseReview(townFromId = 832, currencyAlias = 'RUB'): Promise<SletatShowcaseItem[]> {
     return this.getCached(
       `sletat:showcase:${townFromId}:${currencyAlias}`,
@@ -237,6 +241,14 @@ export class SletatService implements OnModuleInit {
 
   async searchTours(request: SletatNormalizedRequest): Promise<SletatSearchOffer[]> {
     return this.client.searchTours(request);
+  }
+
+  async searchToursBulk(request: SletatNormalizedRequest, opts?: { pageSize?: number }): Promise<SletatSearchOffer[]> {
+    return this.client.searchToursBulk(request, opts);
+  }
+
+  async searchHotToursBulk(params: { cityFromId: number; countryId: number; templateName: string; pageSize?: number }): Promise<SletatSearchOffer[]> {
+    return this.client.searchHotToursBulk(params);
   }
 
   async actualizeOffer(params: {

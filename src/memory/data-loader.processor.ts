@@ -160,6 +160,146 @@ export class DataLoaderProcessor {
 
   // ─── Горящие туры в PostgreSQL ───
 
+  @Process('load-bulk-regular')
+  async handleLoadBulkRegular(_job: Job) {
+    this.logger.log('Loading bulk regular tours...');
+
+    if (this.config.sletat.mode === 'mock') {
+      this.logger.log('Skipping bulk regular (mock mode)');
+      return;
+    }
+
+    const now = new Date();
+    const dateFrom = now.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\./g, '/');
+    const dateTo = new Date(now.getTime() + 30 * 86400000).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\./g, '/');
+
+    let totalSaved = 0;
+    for (const depId of POPULAR_DEPARTURE_IDS) {
+      const countries = await this.sletat.getCountriesForCity(depId);
+      const toLoad = countries.filter((c) => POPULAR_COUNTRY_IDS.includes(Number(c.id)));
+
+      for (const country of toLoad) {
+        try {
+          const offers = await this.sletat.searchToursBulk({
+            departureCityId: String(depId),
+            countryId: country.id,
+            adults: 2,
+            children: 0,
+            dateFrom,
+            dateTo,
+            nightsFrom: 3,
+            nightsTo: 14,
+            currency: 'RUB',
+          }, { pageSize: 2500 });
+
+          const tours = offers.map((o) => ({
+            countryId: country.id,
+            countryName: o.countryName ?? country.name,
+            townFromId: depId,
+            hotelName: o.hotelName ?? null,
+            resortName: o.resortName ?? null,
+            mealName: o.mealName ?? null,
+            starName: null,
+            dateFrom: o.dateFrom ?? null,
+            dateTo: o.dateTo ?? null,
+            nights: o.nights ?? null,
+            price: o.price,
+            currency: o.currency ?? 'RUB',
+            offerId: o.externalOfferId ?? null,
+            sourceId: o.sourceId ?? null,
+            requestId: o.requestId ?? null,
+          }));
+
+          const count = await this.cache.replaceBulkToursForSlice(country.id, country.name, depId, tours);
+          totalSaved += count;
+          this.logger.log(`Bulk regular: dep=${depId} country=${country.name}: ${count} tours`);
+
+          await new Promise((r) => setTimeout(r, 2000));
+        } catch (err) {
+          this.logger.warn(`Bulk regular failed for dep=${depId} country=${country.id}: ${(err as Error).message}`);
+        }
+      }
+    }
+
+    this.logger.log(`Bulk regular done: ${totalSaved} tours saved`);
+  }
+
+  @Process('load-bulk-hot')
+  async handleLoadBulkHot(_job: Job) {
+    this.logger.log('Loading bulk hot tours...');
+
+    if (this.config.sletat.mode === 'mock') {
+      this.logger.log('Skipping bulk hot (mock mode)');
+      return;
+    }
+
+    const templateList = await this.sletat.getTemplates('shared', 0);
+    if (!templateList.length) {
+      this.logger.warn('No hot templates from GetTemplates');
+      return;
+    }
+
+    const departures = await this.sletat.getDepartureCities();
+    let totalSaved = 0;
+
+    for (const template of templateList.slice(0, 3)) {
+      const dep = departures.find((d) => d.name === template.departureCity);
+      const townFromId = dep ? Number(dep.id) : 832;
+
+      for (const countryId of POPULAR_COUNTRY_IDS) {
+        try {
+          const offers = await this.sletat.searchHotToursBulk({
+            cityFromId: townFromId,
+            countryId,
+            templateName: template.name,
+            pageSize: 500,
+          });
+
+          const deals = offers.map((o) => ({
+            countryId: String(countryId),
+            countryName: o.countryName ?? '',
+            hotelName: o.hotelName ?? null,
+            starName: null,
+            resortName: o.resortName ?? null,
+            mealName: o.mealName ?? null,
+            minPrice: o.price,
+            currency: 'RUB',
+            minPriceDate: o.dateFrom ?? null,
+            nights: o.nights ?? null,
+            offerId: o.externalOfferId ?? null,
+            townFromId,
+          }));
+
+          if (deals.length) {
+            const existing = await this.cache.getHotDeals(townFromId);
+            const merged = [...existing.filter((e) => e.countryId !== String(countryId)), ...deals];
+            await this.cache.replaceHotDeals(townFromId, merged.map((m) => ({
+              countryId: m.countryId,
+              countryName: m.countryName,
+              hotelName: m.hotelName,
+              starName: m.starName,
+              resortName: m.resortName,
+              mealName: m.mealName,
+              minPrice: m.minPrice,
+              currency: m.currency,
+              minPriceDate: m.minPriceDate,
+              nights: m.nights,
+              offerId: m.offerId,
+              townFromId: m.townFromId,
+            })));
+            totalSaved += deals.length;
+          }
+
+          await new Promise((r) => setTimeout(r, 1500));
+        } catch (err) {
+          this.logger.warn(`Bulk hot failed template=${template.name} country=${countryId}: ${(err as Error).message}`);
+        }
+      }
+    }
+
+    this.logger.log(`Bulk hot done: ${totalSaved} tours`);
+  }
+
   @Process('load-showcase-review')
   async handleLoadShowcaseReview(_job: Job) {
     this.logger.log('Loading showcase review (hot tours) into DB...');

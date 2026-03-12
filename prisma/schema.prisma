@@ -296,6 +296,32 @@ model CachedHotDeal {
   @@index([fetchedAt])
 }
 
+/// Массовая выгрузка обычных туров (страна × город вылета × диапазон дат)
+model CachedBulkTour {
+  id              String   @id @default(cuid())
+  countryId       String
+  countryName     String
+  townFromId      Int
+  hotelName       String?
+  resortName      String?
+  mealName        String?
+  starName        String?
+  dateFrom        String?
+  dateTo          String?
+  nights          Int?
+  price           Int
+  currency        String   @default("RUB")
+  offerId         String?
+  sourceId        String?
+  requestId       String?
+  fetchedAt       DateTime @default(now())
+
+  @@index([countryId, townFromId])
+  @@index([countryId])
+  @@index([townFromId])
+  @@index([fetchedAt])
+}
+
 model CachedDepartureCity {
   id          String   @id
   name        String
