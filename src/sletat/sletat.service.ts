@@ -91,15 +91,15 @@ export class SletatService {
       resortId: undefined,
       mealId: this.findDictionaryId(meals, parsed.mealType),
       hotelCategory: parsed.hotelCategory,
-      adults: parsed.adults ?? 2,
-      children: parsed.children ?? 0,
-      childrenAges: parsed.childrenAges,
+      adults: this.toInt(parsed.adults, 2),
+      children: this.toInt(parsed.children, 0),
+      childrenAges: parsed.childrenAges?.map(Number),
       dateFrom: parsed.dateFrom ?? undefined,
       dateTo: parsed.dateTo ?? undefined,
-      nightsFrom: parsed.nightsFrom ?? undefined,
-      nightsTo: parsed.nightsTo ?? undefined,
-      budgetMin: parsed.budgetMin ?? undefined,
-      budgetMax: parsed.budgetMax ?? undefined,
+      nightsFrom: this.toIntOrUndef(parsed.nightsFrom),
+      nightsTo: this.toIntOrUndef(parsed.nightsTo),
+      budgetMin: this.toIntOrUndef(parsed.budgetMin),
+      budgetMax: this.toIntOrUndef(parsed.budgetMax),
       currency: parsed.currency ?? 'RUB',
     };
   }
@@ -122,6 +122,18 @@ export class SletatService {
 
   async getPayments(claimId: string) {
     return this.client.getPayments(claimId);
+  }
+
+  private toInt(value: unknown, fallback: number): number {
+    if (value === undefined || value === null) return fallback;
+    const n = Number(value);
+    return Number.isFinite(n) ? Math.round(n) : fallback;
+  }
+
+  private toIntOrUndef(value: unknown): number | undefined {
+    if (value === undefined || value === null) return undefined;
+    const n = Number(value);
+    return Number.isFinite(n) ? Math.round(n) : undefined;
   }
 
   private async getCached<T>(key: string, loader: () => Promise<T>): Promise<T> {
