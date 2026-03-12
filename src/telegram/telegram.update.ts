@@ -508,20 +508,34 @@ export class TelegramUpdate {
 
     const user = await this.ensureUser(ctx);
 
-    const result = await this.booking.createBookingFromOffer({
-      userId: user.id,
-      profileId: decoded.profileId,
-      offerId: decoded.offerId,
-    });
+    try {
+      await ctx.answerCbQuery('Проверяю доступность...');
 
-    const paymentText = result.paymentUrl
-      ? `Ссылка на оплату: ${result.paymentUrl}`
-      : 'Заявка создана, менеджер свяжется с тобой.';
+      const result = await this.booking.createBookingFromOffer({
+        userId: user.id,
+        profileId: decoded.profileId,
+        offerId: decoded.offerId,
+      });
 
-    await ctx.answerCbQuery('Начинаем бронирование');
-    await ctx.reply(
-      `Бронирование создано. Статус: ${result.status}.\n${paymentText}`,
-    );
+      const paymentText = result.paymentUrl
+        ? `Ссылка на оплату: ${result.paymentUrl}`
+        : 'Заявка создана, менеджер свяжется с тобой.';
+
+      await ctx.reply(
+        `✅ Бронирование создано!\nСтатус: ${result.status}\n${paymentText}`,
+      );
+    } catch (err) {
+      const msg = (err as Error).message ?? 'Неизвестная ошибка';
+      this.logger.error(`Booking failed for user ${user.id}: ${msg}`);
+
+      if (msg.includes('больше не доступен')) {
+        await ctx.reply('😔 К сожалению, этот тур уже раскуплен. Попробуй выбрать другой вариант или запусти новый поиск.');
+      } else if (msg.includes('временно недоступен') || msg.includes('Сервис временно')) {
+        await ctx.reply('⏳ Сервис бронирования временно недоступен. Попробуй через несколько минут.');
+      } else {
+        await ctx.reply(`❌ Не удалось забронировать: ${msg}\nПопробуй позже или выбери другой тур.`);
+      }
+    }
   }
 
   @Action(/^page:.+/)
@@ -553,6 +567,7 @@ export class TelegramUpdate {
         price: r.price,
         currency: r.currency,
         externalOfferId: r.externalOfferId,
+        tourUrl: r.tourUrl,
       })),
     };
 

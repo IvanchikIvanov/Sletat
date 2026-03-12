@@ -15,6 +15,7 @@ export class SearchFromTextResult {
     price: number;
     currency: string;
     externalOfferId: string;
+    tourUrl?: string | null;
   }[];
 }
 

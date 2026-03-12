@@ -390,6 +390,16 @@ export class SletatApiService implements SletatClient {
       'tours',
       'data',
     ]);
+    if (raw.length > 0) {
+      const first = raw[0];
+      if (Array.isArray(first)) {
+        this.logger.debug(`First offer is array[${first.length}], sample keys at end: [${first.length - 3}]=${first[first.length - 3]}, [${first.length - 2}]=${first[first.length - 2]}, [${first.length - 1}]=${first[first.length - 1]}`);
+      } else {
+        const keys = Object.keys(first);
+        const tourUrlKey = keys.find(k => k.toLowerCase().includes('toururl') || k.toLowerCase().includes('tour_url'));
+        this.logger.debug(`First offer keys (${keys.length}): ${keys.slice(0, 20).join(', ')}${keys.length > 20 ? '...' : ''}${tourUrlKey ? `, TourUrl key found: ${tourUrlKey}=${first[tourUrlKey]}` : ', no TourUrl key'}`);
+      }
+    }
     return raw
       .map((item) => this.normalizeOfferItem(item) as unknown as SletatSearchOffer)
       .filter((item) => item.externalOfferId && item.hotelName && Number(item.price) > 0);
@@ -414,6 +424,7 @@ export class SletatApiService implements SletatClient {
         nights: this.optionalNumber(item[14]),
         price: Number.isFinite(price) ? price : priceFromStr,
         currency: String(item[43] ?? (priceStr.includes('RUB') ? 'RUB' : 'RUB')) as string,
+        tourUrl: this.optionalString(item[87] ?? item[88]),
       };
     }
     return {
@@ -429,6 +440,7 @@ export class SletatApiService implements SletatClient {
       nights: this.optionalNumber(item.nights),
       price: Number(item.price ?? item.totalPrice ?? 0),
       currency: String(item.currency ?? 'RUB'),
+      tourUrl: this.optionalString(item.TourUrl ?? item.tourUrl ?? item.tour_url),
     };
   }
 

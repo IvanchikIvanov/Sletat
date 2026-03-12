@@ -35,6 +35,7 @@ export interface SletatSearchOffer {
   nights?: number;
   price: number;
   currency: string;
+  tourUrl?: string;
 }
 
 export interface SletatClaimInfo {

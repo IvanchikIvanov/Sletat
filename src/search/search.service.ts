@@ -221,7 +221,7 @@ export class SearchService {
   async actualizeOffer(externalOfferId: string): Promise<SletatSearchOffer | null> {
     const result = await this.sletat.actualizeOffer(externalOfferId);
     if (result) {
-      await this.results.updatePrice(externalOfferId, result.price, result.currency);
+      await this.results.updatePrice(externalOfferId, result.price, result.currency, result.tourUrl);
     }
     return result;
   }
@@ -275,6 +275,7 @@ export class SearchService {
       nights: o.nights ?? null,
       price: o.price,
       currency: o.currency,
+      tourUrl: o.tourUrl ?? null,
     };
   }
 
@@ -310,6 +311,7 @@ export class SearchService {
         price: r.price,
         currency: r.currency,
         externalOfferId: r.externalOfferId,
+        tourUrl: r.tourUrl,
       })),
     };
   }

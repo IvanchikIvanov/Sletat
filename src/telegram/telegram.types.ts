@@ -42,7 +42,6 @@ export function decodePageCallback(data: string): PageCallbackData | null {
   return { profileId: match[1], page: Number(match[2]) };
 }
 
-export function buildTourLink(externalOfferId: string): string | null {
-  if (!externalOfferId || externalOfferId.startsWith('hot-')) return null;
-  return `https://sletat.ru/tour/${externalOfferId}`;
+export function buildTourLink(_externalOfferId: string): string | null {
+  return null;
 }

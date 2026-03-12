@@ -37,6 +37,7 @@ export class SearchResultRepository {
           nights: r.nights,
           price: r.price,
           currency: r.currency,
+          tourUrl: (r as any).tourUrl ?? null,
         },
       });
       created.push(record);
@@ -55,10 +56,12 @@ export class SearchResultRepository {
     return this.prisma.searchResult.findUnique({ where: { id } });
   }
 
-  async updatePrice(id: string, price: number, currency: string): Promise<SearchResult> {
+  async updatePrice(id: string, price: number, currency: string, tourUrl?: string | null): Promise<SearchResult> {
+    const data: Record<string, unknown> = { price, currency };
+    if (tourUrl !== undefined) data.tourUrl = tourUrl;
     return this.prisma.searchResult.update({
       where: { id },
-      data: { price, currency },
+      data,
     });
   }
 }

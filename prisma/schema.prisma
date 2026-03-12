@@ -88,6 +88,7 @@ model SearchResult {
   nights          Int?
   price           Int
   currency        String         @default("RUB")
+  tourUrl         String?
   isActive        Boolean        @default(true)
   foundAt         DateTime       @default(now())
 

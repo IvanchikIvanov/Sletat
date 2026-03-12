@@ -6,7 +6,6 @@ import {
   encodeBookCallback,
   encodeWatchCallback,
   encodePageCallback,
-  buildTourLink,
 } from './telegram.types';
 import { SletatShowcaseItem } from '../sletat/sletat.types';
 
@@ -24,6 +23,7 @@ export interface SearchOffer {
   price: number;
   currency: string;
   externalOfferId: string;
+  tourUrl?: string | null;
 }
 
 export interface SearchResultPayload {
@@ -75,9 +75,8 @@ export class TelegramService {
 
     for (const o of pageOffers) {
       const row: { text: string; callback_data: string; url?: string }[] = [];
-      const link = buildTourLink(o.externalOfferId);
-      if (link) {
-        row.push({ text: '🔗 Подробнее', callback_data: `noop`, url: link });
+      if (o.tourUrl) {
+        row.push({ text: '🔗 Подробнее', callback_data: 'noop', url: o.tourUrl });
       }
       row.push({
         text: '📝 Бронировать',
@@ -141,10 +140,9 @@ export class TelegramService {
     });
 
     const keyboard: { text: string; callback_data: string; url?: string }[][] = [];
-    const link = buildTourLink(result.externalOfferId);
     const actionRow: { text: string; callback_data: string; url?: string }[] = [];
-    if (link) {
-      actionRow.push({ text: '🔗 Подробнее', callback_data: 'noop', url: link });
+    if ((result as any).tourUrl) {
+      actionRow.push({ text: '🔗 Подробнее', callback_data: 'noop', url: (result as any).tourUrl });
     }
     actionRow.push({ text: '📝 Бронировать', callback_data: encodeBookCallback(result.id) });
     keyboard.push(actionRow);
