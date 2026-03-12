@@ -7,6 +7,7 @@ import { SearchResultRepository } from './repositories/search-result.repository'
 import { SubscriptionRepository } from './repositories/subscription.repository';
 import { NotificationLogRepository } from './repositories/notification-log.repository';
 import { BookingRepository } from './repositories/booking.repository';
+import { CacheRepository } from './repositories/cache.repository';
 import { RedisModule } from './redis.module';
 
 @Global()
@@ -21,6 +22,7 @@ import { RedisModule } from './redis.module';
     SubscriptionRepository,
     NotificationLogRepository,
     BookingRepository,
+    CacheRepository,
   ],
   exports: [
     PrismaService,
@@ -31,6 +33,7 @@ import { RedisModule } from './redis.module';
     SubscriptionRepository,
     NotificationLogRepository,
     BookingRepository,
+    CacheRepository,
   ],
 })
 export class PersistenceModule {}

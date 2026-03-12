@@ -3,6 +3,7 @@ import { FactExtractorService } from './fact-extractor.service';
 import { UserPreferencesService } from '../preferences/user-preferences.service';
 import { KnowledgeService } from '../knowledge/knowledge.service';
 import { SletatService } from '../sletat/sletat.service';
+import { CacheRepository } from '../persistence/repositories/cache.repository';
 import { SearchProfileRepository } from '../persistence/repositories/search-profile.repository';
 import { MemoryContext } from './dto/memory-context.dto';
 import { ParsedTourRequest } from '../openai/dto/tour-request.schema';
@@ -17,17 +18,52 @@ export class MemoryService {
     private readonly knowledge: KnowledgeService,
     private readonly sletat: SletatService,
     private readonly profiles: SearchProfileRepository,
+    private readonly cache: CacheRepository,
   ) {}
 
   async getContextForQuery(userId: string, query: string): Promise<MemoryContext> {
-    const [userFacts, userPreferences, relevantKnowledge, userDefaults] = await Promise.all([
+    const [userFacts, userPreferences, relevantKnowledge, userDefaults, dbSummary] = await Promise.all([
       this.factExtractor.getUserFacts(userId, query),
       this.preferences.findRelevantPreferences(userId, query),
       this.knowledge.findRelevantKnowledge(query),
       this.getUserDefaults(userId),
+      this.getDbCacheSummary(),
     ]);
 
-    return { userFacts, userPreferences, relevantKnowledge, userDefaults };
+    const enrichedKnowledge = [...relevantKnowledge];
+    if (dbSummary) enrichedKnowledge.push(dbSummary);
+
+    return { userFacts, userPreferences, relevantKnowledge: enrichedKnowledge, userDefaults };
+  }
+
+  private async getDbCacheSummary(): Promise<string | null> {
+    try {
+      const [departures, countries, hotDeals] = await Promise.all([
+        this.cache.getAllDepartureCities(),
+        this.cache.getCountries(832),
+        this.cache.getHotDeals(832),
+      ]);
+
+      if (!departures.length && !countries.length) return null;
+
+      const parts: string[] = [];
+
+      if (departures.length) {
+        parts.push(`Города вылета (${departures.length}): ${departures.slice(0, 20).map((d) => d.name).join(', ')}`);
+      }
+      if (countries.length) {
+        parts.push(`Доступные страны (${countries.length}): ${countries.slice(0, 30).map((c) => c.name).join(', ')}`);
+      }
+      if (hotDeals.length) {
+        const uniqueCountries = [...new Set(hotDeals.map((d) => d.countryName))];
+        const cheapest = hotDeals.slice(0, 5).map((d) => `${d.countryName} от ${d.minPrice} ${d.currency}`);
+        parts.push(`Горящие туры (${hotDeals.length} шт, ${uniqueCountries.length} стран): ${cheapest.join('; ')}`);
+      }
+
+      return `АКТУАЛЬНЫЕ ДАННЫЕ ИЗ БАЗЫ (обновлено ${new Date().toISOString().slice(0, 10)}):\n${parts.join('\n')}`;
+    } catch {
+      return null;
+    }
   }
 
   async extractFactsFromMessage(userId: string, message: string): Promise<void> {

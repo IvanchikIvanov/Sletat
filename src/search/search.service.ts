@@ -1,20 +1,25 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { SearchProfileRepository } from '../persistence/repositories/search-profile.repository';
 import { SearchRequestRepository } from '../persistence/repositories/search-request.repository';
 import { SearchResultRepository } from '../persistence/repositories/search-result.repository';
+import { CacheRepository } from '../persistence/repositories/cache.repository';
 import { SletatService } from '../sletat/sletat.service';
 import { SearchContext, SearchFromTextResult } from './dto/search-request.dto';
 import { SletatNormalizedRequest, SletatSearchOffer } from '../sletat/sletat.types';
 
 const MAX_VISA_FREE_COUNTRIES_TO_SEARCH = 5;
+const HOT_DEAL_MAX_AGE_MS = 2 * 60 * 60 * 1000;
 
 @Injectable()
 export class SearchService {
+  private readonly logger = new Logger(SearchService.name);
+
   constructor(
     private readonly profiles: SearchProfileRepository,
     private readonly requests: SearchRequestRepository,
     private readonly results: SearchResultRepository,
     private readonly sletat: SletatService,
+    private readonly cache: CacheRepository,
   ) {}
 
   async searchFromParsed(context: SearchContext): Promise<SearchFromTextResult> {
@@ -54,59 +59,80 @@ export class SearchService {
       parsedJson: context.parsed,
     });
 
+    // Шаг 1: Проверяем горящие туры из БД (если запрос подходит)
+    const hotDealsOffers = await this.tryHotDealsFromDb(normalized);
+    if (hotDealsOffers.length > 0) {
+      this.logger.debug(`Found ${hotDealsOffers.length} hot deals from DB cache`);
+      await this.requests.markSuccess(request.id, context.parsed);
+      const dbResults = await this.results.createManyForProfile(
+        profile.id,
+        hotDealsOffers.map((o) => this.offerToDbRow(o)),
+      );
+      return this.buildResult(profile.id, profile.name, dbResults);
+    }
+
+    // Шаг 2: Поиск через API Sletat
     const offers = await this.sletat.searchTours(normalized);
 
     if (!offers.length) {
       await this.requests.markFailed(request.id, 'No offers found');
-      return {
-        profileId: profile.id,
-        profileName: profile.name,
-        offers: [],
-      };
+      return { profileId: profile.id, profileName: profile.name, offers: [] };
     }
 
     await this.requests.markSuccess(request.id, context.parsed);
 
     const dbResults = await this.results.createManyForProfile(
       profile.id,
-      offers.map((o) => ({
-        externalOfferId: o.externalOfferId,
-        hotelName: o.hotelName ?? null,
-        countryName: o.countryName ?? null,
-        resortName: o.resortName ?? null,
-        mealName: o.mealName ?? null,
-        roomName: o.roomName ?? null,
-        departureCity: o.departureCity ?? null,
-        dateFrom: o.dateFrom ? new Date(o.dateFrom) : null,
-        dateTo: o.dateTo ? new Date(o.dateTo) : null,
-        nights: o.nights ?? null,
-        price: o.price,
-        currency: o.currency,
-      })),
+      offers.map((o) => this.offerToDbRow(o)),
     );
 
-    return {
-      profileId: profile.id,
-      profileName: profile.name,
-      offers: dbResults.map((r) => ({
-        id: r.id,
-        hotelName: r.hotelName,
-        countryName: r.countryName,
-        resortName: r.resortName,
-        mealName: r.mealName,
-        dateFrom: r.dateFrom,
-        dateTo: r.dateTo,
-        nights: r.nights,
-        price: r.price,
-        currency: r.currency,
-        externalOfferId: r.externalOfferId,
-      })),
-    };
+    return this.buildResult(profile.id, profile.name, dbResults);
   }
 
   /**
-   * Поиск по нескольким странам (для visa-free: страны без визы).
+   * Проверяем, можно ли ответить из кэша горящих туров.
+   * Подходит если: есть countryId, данные свежие, и нет жёстких фильтров по отелю/курорту.
    */
+  private async tryHotDealsFromDb(normalized: SletatNormalizedRequest): Promise<SletatSearchOffer[]> {
+    if (!normalized.countryId) return [];
+
+    const townFromId = normalized.departureCityId ? Number(normalized.departureCityId) : 832;
+    const isStale = await this.cache.isStale('hotDeal', HOT_DEAL_MAX_AGE_MS, String(townFromId));
+    if (isStale) return [];
+
+    const deals = await this.cache.getHotDealsForCountry(normalized.countryId, townFromId);
+    if (!deals.length) return [];
+
+    let filtered = deals;
+
+    if (normalized.budgetMax) {
+      filtered = filtered.filter((d) => d.minPrice <= normalized.budgetMax!);
+    }
+    if (normalized.nightsFrom) {
+      filtered = filtered.filter((d) => !d.nights || d.nights >= normalized.nightsFrom!);
+    }
+    if (normalized.nightsTo) {
+      filtered = filtered.filter((d) => !d.nights || d.nights <= normalized.nightsTo!);
+    }
+
+    if (!filtered.length) return [];
+
+    return filtered.slice(0, 10).map((d) => ({
+      externalOfferId: d.offerId ?? `hot-${d.id}`,
+      hotelName: d.hotelName ?? '',
+      countryName: d.countryName,
+      resortName: d.resortName ?? '',
+      mealName: d.mealName ?? '',
+      roomName: '',
+      departureCity: '',
+      dateFrom: d.minPriceDate ?? '',
+      dateTo: '',
+      nights: d.nights ?? 0,
+      price: d.minPrice,
+      currency: d.currency,
+    }));
+  }
+
   async searchFromParsedWithCountries(
     context: SearchContext,
     countryNames: string[],
@@ -133,10 +159,7 @@ export class SearchService {
     const seenIds = new Set<string>();
 
     for (const countryId of countryIds) {
-      const req: SletatNormalizedRequest = {
-        ...baseNormalized,
-        countryId,
-      };
+      const req: SletatNormalizedRequest = { ...baseNormalized, countryId };
       const offers = await this.sletat.searchTours(req);
       for (const o of offers) {
         if (!seenIds.has(o.externalOfferId)) {
@@ -185,39 +208,22 @@ export class SearchService {
 
     const dbResults = await this.results.createManyForProfile(
       profile.id,
-      allOffers.map((o) => ({
-        externalOfferId: o.externalOfferId,
-        hotelName: o.hotelName ?? null,
-        countryName: o.countryName ?? null,
-        resortName: o.resortName ?? null,
-        mealName: o.mealName ?? null,
-        roomName: o.roomName ?? null,
-        departureCity: o.departureCity ?? null,
-        dateFrom: o.dateFrom ? new Date(o.dateFrom) : null,
-        dateTo: o.dateTo ? new Date(o.dateTo) : null,
-        nights: o.nights ?? null,
-        price: o.price,
-        currency: o.currency,
-      })),
+      allOffers.map((o) => this.offerToDbRow(o)),
     );
 
-    return {
-      profileId: profile.id,
-      profileName: profile.name,
-      offers: dbResults.map((r) => ({
-        id: r.id,
-        hotelName: r.hotelName,
-        countryName: r.countryName,
-        resortName: r.resortName,
-        mealName: r.mealName,
-        dateFrom: r.dateFrom,
-        dateTo: r.dateTo,
-        nights: r.nights,
-        price: r.price,
-        currency: r.currency,
-        externalOfferId: r.externalOfferId,
-      })),
-    };
+    return this.buildResult(profile.id, profile.name, dbResults);
+  }
+
+  /**
+   * Актуализация тура: проверяет через API Sletat, актуален ли оффер.
+   * Возвращает обновлённый оффер или null если тур больше недоступен.
+   */
+  async actualizeOffer(externalOfferId: string): Promise<SletatSearchOffer | null> {
+    const result = await this.sletat.actualizeOffer(externalOfferId);
+    if (result) {
+      await this.results.updatePrice(externalOfferId, result.price, result.currency);
+    }
+    return result;
   }
 
   async searchForProfile(profileId: string) {
@@ -245,29 +251,50 @@ export class SearchService {
     };
 
     const offers = await this.sletat.searchTours(normalized);
-    if (!offers.length) {
-      return [];
-    }
+    if (!offers.length) return [];
 
     const dbResults = await this.results.createManyForProfile(
       profileId,
-      offers.map((o) => ({
-        externalOfferId: o.externalOfferId,
-        hotelName: o.hotelName ?? null,
-        countryName: o.countryName ?? null,
-        resortName: o.resortName ?? null,
-        mealName: o.mealName ?? null,
-        roomName: o.roomName ?? null,
-        departureCity: o.departureCity ?? null,
-        dateFrom: o.dateFrom ? new Date(o.dateFrom) : null,
-        dateTo: o.dateTo ? new Date(o.dateTo) : null,
-        nights: o.nights ?? null,
-        price: o.price,
-        currency: o.currency,
-      })),
+      offers.map((o) => this.offerToDbRow(o)),
     );
 
     return dbResults;
   }
-}
 
+  private offerToDbRow(o: SletatSearchOffer) {
+    return {
+      externalOfferId: o.externalOfferId,
+      hotelName: o.hotelName ?? null,
+      countryName: o.countryName ?? null,
+      resortName: o.resortName ?? null,
+      mealName: o.mealName ?? null,
+      roomName: o.roomName ?? null,
+      departureCity: o.departureCity ?? null,
+      dateFrom: o.dateFrom ? new Date(o.dateFrom) : null,
+      dateTo: o.dateTo ? new Date(o.dateTo) : null,
+      nights: o.nights ?? null,
+      price: o.price,
+      currency: o.currency,
+    };
+  }
+
+  private buildResult(profileId: string, profileName: string, dbResults: any[]): SearchFromTextResult {
+    return {
+      profileId,
+      profileName,
+      offers: dbResults.map((r) => ({
+        id: r.id,
+        hotelName: r.hotelName,
+        countryName: r.countryName,
+        resortName: r.resortName,
+        mealName: r.mealName,
+        dateFrom: r.dateFrom,
+        dateTo: r.dateTo,
+        nights: r.nights,
+        price: r.price,
+        currency: r.currency,
+        externalOfferId: r.externalOfferId,
+      })),
+    };
+  }
+}

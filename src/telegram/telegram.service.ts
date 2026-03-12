@@ -3,6 +3,7 @@ import { Telegraf } from 'telegraf';
 import { InjectBot } from 'nestjs-telegraf';
 import { NotificationReason, SearchResult } from '@prisma/client';
 import { encodeBookCallback, encodeWatchCallback } from './telegram.types';
+import { SletatShowcaseItem } from '../sletat/sletat.types';
 
 @Injectable()
 export class TelegramService {
@@ -108,6 +109,28 @@ export class TelegramService {
   async sendMessage(telegramId: string, text: string): Promise<void> {
     const chatId = Number(telegramId);
     await this.bot.telegram.sendMessage(chatId, text);
+  }
+
+  async sendShowcaseResults(chatId: number, items: SletatShowcaseItem[], title: string) {
+    if (!items.length) {
+      await this.bot.telegram.sendMessage(chatId, 'Горящих предложений по этому направлению сейчас нет.');
+      return;
+    }
+
+    const lines = [title, ''];
+    for (const item of items.slice(0, 10)) {
+      const parts: string[] = [];
+      if (item.hotelName) parts.push(item.hotelName);
+      if (item.starName) parts.push(item.starName);
+      if (item.resortName) parts.push(item.resortName);
+      if (item.mealName) parts.push(item.mealName);
+      if (item.nights) parts.push(`${item.nights} н.`);
+      if (item.minPriceDate) parts.push(`от ${item.minPriceDate}`);
+      parts.push(`от ${item.minPrice}`);
+      lines.push(`• ${item.countryName}: ${parts.join(', ')}`);
+    }
+
+    await this.bot.telegram.sendMessage(chatId, lines.join('\n'));
   }
 
   private formatOfferLine(o: {

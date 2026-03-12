@@ -8,6 +8,7 @@ import { BookingService } from '../booking/booking.service';
 import { TelegramService } from './telegram.service';
 import { DialogContextService } from '../dialog/dialog-context.service';
 import { MemoryService } from '../memory/memory.service';
+import { SletatService } from '../sletat/sletat.service';
 import { decodeBookCallback, decodeWatchCallback } from './telegram.types';
 import { ParseTourResponse } from '../openai/dto/tour-request.schema';
 import * as fs from 'fs';
@@ -41,6 +42,7 @@ export class TelegramUpdate {
     private readonly telegram: TelegramService,
     private readonly dialogCtx: DialogContextService,
     private readonly memory: MemoryService,
+    private readonly sletat: SletatService,
   ) {}
 
   @Start()
@@ -56,10 +58,37 @@ export class TelegramUpdate {
   async onHelp(@Ctx() ctx: Context) {
     await ctx.reply(
       '/start — начать\n' +
+        '/hot — горящие туры\n' +
         '/help — помощь\n' +
         '/subscriptions — активные подписки\n' +
         'Просто напиши запрос о туре или отправь голосовое сообщение.',
     );
+  }
+
+  @Command('hot')
+  async onHot(@Ctx() ctx: Context) {
+    await this.ensureUser(ctx);
+
+    const dbDeals = await this.sletat.getHotDealsFromDb(832);
+    if (dbDeals.length > 0) {
+      const lines = ['🔥 Горящие туры из Москвы:', ''];
+      for (const d of dbDeals.slice(0, 15)) {
+        const parts: string[] = [];
+        if (d.hotelName) parts.push(d.hotelName);
+        if (d.starName) parts.push(d.starName);
+        if (d.resortName) parts.push(d.resortName);
+        if (d.mealName) parts.push(d.mealName);
+        if (d.nights) parts.push(`${d.nights} н.`);
+        if (d.minPriceDate) parts.push(`от ${d.minPriceDate}`);
+        parts.push(`от ${d.minPrice} ${d.currency}`);
+        lines.push(`• ${d.countryName}: ${parts.join(', ')}`);
+      }
+      await ctx.reply(lines.join('\n'));
+      return;
+    }
+
+    const items = await this.sletat.getHotDealsAll();
+    await this.telegram.sendShowcaseResults(ctx.chat!.id, items, '🔥 Горящие туры из Москвы:');
   }
 
   @Command('subscriptions')

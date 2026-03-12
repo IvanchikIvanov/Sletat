@@ -43,6 +43,16 @@ export interface SletatClaimInfo {
   paymentUrl?: string;
 }
 
+export interface SletatHotelItem {
+  id: string;
+  name: string;
+  starId?: string;
+  starName?: string;
+  townId?: string;
+  rating?: number;
+  photosCount?: number;
+}
+
 export interface SletatShowcaseItem {
   countryId: string;
   countryName: string;

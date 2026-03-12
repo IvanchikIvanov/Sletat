@@ -47,27 +47,30 @@ export class SearchProfileRepository {
   async upsertForUser(input: UpsertSearchProfileInput): Promise<SearchProfile> {
     const { userId, name, childrenAges, ...rest } = input;
 
+    const data = {
+      ...rest,
+      adults: rest.adults != null ? Number(rest.adults) : undefined,
+      children: rest.children != null ? Number(rest.children) : undefined,
+      nightsFrom: rest.nightsFrom != null ? Number(rest.nightsFrom) : undefined,
+      nightsTo: rest.nightsTo != null ? Number(rest.nightsTo) : undefined,
+      budgetMin: rest.budgetMin != null ? Number(rest.budgetMin) : undefined,
+      budgetMax: rest.budgetMax != null ? Number(rest.budgetMax) : undefined,
+      childrenAges: childrenAges ? (childrenAges as unknown as any) : undefined,
+    };
+
     const existing = await this.prisma.searchProfile.findFirst({
       where: { userId, name },
     });
 
     if (!existing) {
       return this.prisma.searchProfile.create({
-        data: {
-          userId,
-          name,
-          childrenAges: childrenAges ? (childrenAges as unknown as any) : undefined,
-          ...rest,
-        },
+        data: { userId, name, ...data },
       });
     }
 
     return this.prisma.searchProfile.update({
       where: { id: existing.id },
-      data: {
-        childrenAges: childrenAges ? (childrenAges as unknown as any) : undefined,
-        ...rest,
-      },
+      data,
     });
   }
 }

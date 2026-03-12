@@ -229,3 +229,99 @@ model UserFact {
   @@index([category])
 }
 
+// ─── Sletat справочники (кэш) ───
+
+model CachedCountry {
+  id           String   @id
+  name         String
+  alias        String?
+  isVisa       Boolean  @default(false)
+  flags        Int      @default(0)
+  rank         Int      @default(0)
+  townFromId   Int      @default(832)
+  fetchedAt    DateTime @default(now())
+
+  resorts      CachedResort[]
+  hotels       CachedHotel[]
+  hotDeals     CachedHotDeal[]
+
+  @@unique([id, townFromId])
+  @@index([townFromId])
+  @@index([name])
+}
+
+model CachedResort {
+  id          String   @id
+  name        String
+  countryId   String
+  isPopular   Boolean  @default(false)
+  parentId    String?
+  fetchedAt   DateTime @default(now())
+
+  country     CachedCountry @relation(fields: [countryId], references: [id], onDelete: Cascade)
+  hotels      CachedHotel[]
+
+  @@index([countryId])
+  @@index([name])
+}
+
+model CachedHotel {
+  id          String   @id
+  name        String
+  countryId   String
+  resortId    String?
+  starId      String?
+  starName    String?
+  rating      Float?
+  photosCount Int      @default(0)
+  fetchedAt   DateTime @default(now())
+
+  country     CachedCountry @relation(fields: [countryId], references: [id], onDelete: Cascade)
+  resort      CachedResort? @relation(fields: [resortId], references: [id], onDelete: SetNull)
+
+  @@index([countryId])
+  @@index([resortId])
+  @@index([name])
+  @@index([starName])
+}
+
+model CachedHotDeal {
+  id            String   @id @default(cuid())
+  countryId     String
+  countryName   String
+  hotelName     String?
+  starName      String?
+  resortName    String?
+  mealName      String?
+  minPrice      Int
+  currency      String   @default("RUB")
+  minPriceDate  String?
+  nights        Int?
+  offerId       String?
+  townFromId    Int      @default(832)
+  fetchedAt     DateTime @default(now())
+
+  country       CachedCountry @relation(fields: [countryId], references: [id], onDelete: Cascade)
+
+  @@index([countryId])
+  @@index([townFromId])
+  @@index([fetchedAt])
+}
+
+model CachedDepartureCity {
+  id          String   @id
+  name        String
+  countryId   String?
+  isDefault   Boolean  @default(false)
+  isPopular   Boolean  @default(false)
+  fetchedAt   DateTime @default(now())
+
+  @@index([name])
+}
+
+model CachedMeal {
+  id          String   @id
+  name        String
+  fetchedAt   DateTime @default(now())
+}
+

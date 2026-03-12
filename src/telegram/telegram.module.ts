@@ -11,6 +11,7 @@ import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
 import { BookingModule } from '../booking/booking.module';
 import { DialogModule } from '../dialog/dialog.module';
 import { MemoryModule } from '../memory/memory.module';
+import { SletatModule } from '../sletat/sletat.module';
 
 @Module({
   imports: [
@@ -22,6 +23,7 @@ import { MemoryModule } from '../memory/memory.module';
     BookingModule,
     DialogModule,
     MemoryModule,
+    SletatModule,
     TelegrafModule.forRootAsync({
       imports: [ConfigModule],
       inject: [AppConfigService],

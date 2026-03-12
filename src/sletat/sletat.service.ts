@@ -1,20 +1,149 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { SletatClient } from './sletat.client';
 import { ParsedTourRequest } from '../openai/dto/tour-request.schema';
-import { SletatNormalizedRequest, SletatSearchOffer, SletatDictionaryItem, SletatShowcaseItem } from './sletat.types';
+import { SletatNormalizedRequest, SletatSearchOffer, SletatDictionaryItem, SletatHotelItem, SletatShowcaseItem } from './sletat.types';
+import { CacheRepository } from '../persistence/repositories/cache.repository';
 import { REDIS_CLIENT } from '../persistence/redis.provider';
 import type Redis from 'ioredis';
 
 const CACHE_TTL_SECONDS = 60 * 60;
 
 @Injectable()
-export class SletatService {
+export class SletatService implements OnModuleInit {
   private readonly logger = new Logger(SletatService.name);
 
   constructor(
     @Inject('SLETAT_CLIENT') private readonly client: SletatClient,
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
+    private readonly cache: CacheRepository,
   ) {}
+
+  async onModuleInit() {
+    this.preloadDictionaries().catch((err) =>
+      this.logger.warn(`Failed to preload dictionaries: ${err.message}`),
+    );
+  }
+
+  private async preloadDictionaries() {
+    this.logger.log('Preloading Sletat dictionaries into cache...');
+    const [departures] = await Promise.all([
+      this.getDepartureCities(),
+      this.getMeals(),
+      this.getShowcaseReview(832),
+    ]);
+    if (departures.length) {
+      const popularIds = [832, 1264, 1265];
+      await Promise.all(
+        popularIds.map((id) => this.getCountriesForCity(id).catch(() => [])),
+      );
+    }
+    this.logger.log(`Preloaded ${departures.length} departure cities + countries + showcase`);
+  }
+
+  // ─── Справочники (Redis-кэш + API) ───
+
+  async getDepartureCities(): Promise<SletatDictionaryItem[]> {
+    return this.getCached('sletat:departureCities', () => this.client.loadDepartureCities());
+  }
+
+  async getCountries(): Promise<SletatDictionaryItem[]> {
+    return this.getCached('sletat:countries', () => this.client.loadCountries());
+  }
+
+  async getCountriesForCity(townFromId: number): Promise<SletatDictionaryItem[]> {
+    return this.getCached(`sletat:countries:${townFromId}`, () => this.client.loadCountries(townFromId));
+  }
+
+  async getMeals(): Promise<SletatDictionaryItem[]> {
+    return this.getCached('sletat:meals', () => this.client.loadMeals());
+  }
+
+  async getCities(countryId: number): Promise<SletatDictionaryItem[]> {
+    return this.getCached(`sletat:cities:${countryId}`, () => this.client.loadCities(countryId));
+  }
+
+  async getHotels(countryId: number): Promise<SletatHotelItem[]> {
+    return this.getCached(`sletat:hotels:${countryId}`, () => this.client.loadHotels(countryId));
+  }
+
+  async getHotelStars(countryId: number): Promise<SletatDictionaryItem[]> {
+    return this.getCached(`sletat:stars:${countryId}`, () => this.client.loadHotelStars(countryId));
+  }
+
+  async getShowcaseReview(townFromId = 832, currencyAlias = 'RUB'): Promise<SletatShowcaseItem[]> {
+    return this.getCached(
+      `sletat:showcase:${townFromId}:${currencyAlias}`,
+      () => this.client.loadShowcaseReview(townFromId, currencyAlias),
+    );
+  }
+
+  // ─── Горящие туры (из БД) ───
+
+  async getHotDealsFromDb(townFromId = 832) {
+    return this.cache.getHotDeals(townFromId);
+  }
+
+  async getHotDealsForCountryFromDb(countryId: string, townFromId = 832) {
+    return this.cache.getHotDealsForCountry(countryId, townFromId);
+  }
+
+  async getHotDealsForCountry(
+    countryName: string,
+    departureCityName?: string,
+  ): Promise<SletatShowcaseItem[]> {
+    const departures = await this.getDepartureCities();
+    const depId = departureCityName
+      ? this.findDictionaryId(departures, departureCityName)
+      : undefined;
+    const townFromId = depId ? Number(depId) : 832;
+
+    const showcase = await this.getShowcaseReview(townFromId);
+    const lower = countryName.trim().toLowerCase();
+    return showcase.filter(
+      (item) => item.countryName.toLowerCase().includes(lower) || lower.includes(item.countryName.toLowerCase()),
+    );
+  }
+
+  async getHotDealsAll(departureCityName?: string): Promise<SletatShowcaseItem[]> {
+    const departures = await this.getDepartureCities();
+    const depId = departureCityName
+      ? this.findDictionaryId(departures, departureCityName)
+      : undefined;
+    const townFromId = depId ? Number(depId) : 832;
+    return this.getShowcaseReview(townFromId);
+  }
+
+  // ─── Поиск по БД-кэшу ───
+
+  async findCountryInDb(name: string, townFromId = 832) {
+    return this.cache.findCountryByName(name, townFromId);
+  }
+
+  async findResortInDb(name: string, countryId: string) {
+    return this.cache.findResortByName(name, countryId);
+  }
+
+  async findHotelInDb(name: string, countryId?: string) {
+    return this.cache.findHotelByName(name, countryId);
+  }
+
+  async findDepartureCityInDb(name: string) {
+    return this.cache.findDepartureCityByName(name);
+  }
+
+  async getResortsFromDb(countryId: string) {
+    return this.cache.getResorts(countryId);
+  }
+
+  async getHotelsFromDb(countryId: string, opts?: { starName?: string; resortId?: string }) {
+    return this.cache.getHotels(countryId, opts);
+  }
+
+  async getDbFreshness(table: 'country' | 'resort' | 'hotel' | 'hotDeal' | 'meal' | 'departureCity', maxAgeMs: number, key?: string) {
+    return this.cache.isStale(table, maxAgeMs, key);
+  }
+
+  // ─── Нормализация запроса ───
 
   async getCountryIdsByNames(
     names: string[],
@@ -44,37 +173,6 @@ export class SletatService {
     return partial?.id;
   }
 
-  async getDepartureCities(): Promise<SletatDictionaryItem[]> {
-    return this.getCached('sletat:departureCities', () => this.client.loadDepartureCities());
-  }
-
-  async getCountries(): Promise<SletatDictionaryItem[]> {
-    return this.getCached('sletat:countries', () => this.client.loadCountries());
-  }
-
-  async getCountriesForCity(townFromId: number): Promise<SletatDictionaryItem[]> {
-    return this.getCached(`sletat:countries:${townFromId}`, () => this.client.loadCountries(townFromId));
-  }
-
-  async getMeals(): Promise<SletatDictionaryItem[]> {
-    return this.getCached('sletat:meals', () => this.client.loadMeals());
-  }
-
-  async getHotels(): Promise<SletatDictionaryItem[]> {
-    return this.getCached('sletat:hotels', () => this.client.loadHotels());
-  }
-
-  async getShowcaseReview(townFromId = 832, currencyAlias = 'RUB'): Promise<SletatShowcaseItem[]> {
-    return this.getCached(
-      `sletat:showcase:${townFromId}:${currencyAlias}`,
-      () => this.client.loadShowcaseReview(townFromId, currencyAlias),
-    );
-  }
-
-  /**
-   * Нормализация запроса с использованием кэшированных словарей.
-   * Не дёргает API на каждый запрос — берёт из Redis.
-   */
   async normalizeRequest(parsed: ParsedTourRequest): Promise<SletatNormalizedRequest> {
     const [departures, meals] = await Promise.all([
       this.getDepartureCities(),
@@ -85,10 +183,27 @@ export class SletatService {
     const townFromId = departureCityId ? Number(departureCityId) : 832;
     const countries = await this.getCountriesForCity(townFromId);
 
+    const countryId = this.findDictionaryId(countries, parsed.country ?? parsed.resort);
+
+    let resortId: string | undefined;
+    if (countryId && parsed.resort) {
+      const cachedResort = await this.findResortInDb(parsed.resort, countryId);
+      if (cachedResort) {
+        resortId = cachedResort.id;
+      } else {
+        try {
+          const resorts = await this.getCities(Number(countryId));
+          resortId = this.findDictionaryId(resorts, parsed.resort);
+        } catch {
+          this.logger.warn(`Failed to load resorts for country ${countryId}`);
+        }
+      }
+    }
+
     return {
       departureCityId,
-      countryId: this.findDictionaryId(countries, parsed.country ?? parsed.resort),
-      resortId: undefined,
+      countryId,
+      resortId,
       mealId: this.findDictionaryId(meals, parsed.mealType),
       hotelCategory: parsed.hotelCategory,
       adults: this.toInt(parsed.adults, 2),
@@ -146,4 +261,3 @@ export class SletatService {
     return value;
   }
 }
-

@@ -5,6 +5,7 @@ import { SletatClient } from './sletat.client';
 import {
   SletatClaimInfo,
   SletatDictionaryItem,
+  SletatHotelItem,
   SletatNormalizedRequest,
   SletatSearchOffer,
   SletatShowcaseItem,
@@ -40,9 +41,21 @@ export class SletatApiService implements SletatClient {
     return this.mapDictionary(payload, ['GetMealsResult', 'meals', 'foodTypes']);
   }
 
-  async loadHotels(): Promise<SletatDictionaryItem[]> {
-    const payload = await this.callSearchApi('SLETAT_ENDPOINT_HOTELS', this.config.sletat.protocol, {});
-    return this.mapDictionary(payload, ['GetHotelsResult', 'hotels']);
+  async loadHotels(countryId?: number): Promise<SletatHotelItem[]> {
+    const params: Record<string, unknown> = {};
+    if (countryId) params.countryId = countryId;
+    const payload = await this.callSearchApi('SLETAT_ENDPOINT_HOTELS', this.config.sletat.protocol, params);
+    return this.mapHotels(payload);
+  }
+
+  async loadCities(countryId: number): Promise<SletatDictionaryItem[]> {
+    const payload = await this.callSearchApi('SLETAT_ENDPOINT_CITIES', this.config.sletat.protocol, { countryId });
+    return this.mapDictionary(payload, ['GetCitiesResult', 'cities', 'resorts']);
+  }
+
+  async loadHotelStars(countryId: number): Promise<SletatDictionaryItem[]> {
+    const payload = await this.callSearchApi('SLETAT_ENDPOINT_HOTEL_STARS', this.config.sletat.protocol, { countryId });
+    return this.mapDictionary(payload, ['GetHotelStarsResult', 'stars', 'hotelStars']);
   }
 
   async loadShowcaseReview(townFromId = 832, currencyAlias = 'RUB'): Promise<SletatShowcaseItem[]> {
@@ -86,6 +99,9 @@ export class SletatApiService implements SletatClient {
   async searchTours(request: SletatNormalizedRequest): Promise<SletatSearchOffer[]> {
     const params = this.toSearchParams(request);
 
+    this.logger.debug(`Search params: cityFromId=${params.cityFromId}, countryId=${params.countryId}, ` +
+      `dates=${params.s_departFrom}-${params.s_departTo}, nights=${params.s_nightsMin}-${params.s_nightsMax}`);
+
     const firstPayload = await this.callSearchApi(
       'SLETAT_ENDPOINT_SEARCH',
       this.config.sletat.protocol,
@@ -94,16 +110,19 @@ export class SletatApiService implements SletatClient {
 
     let offers = this.mapOffers(firstPayload);
     if (offers.length > 0) {
+      this.logger.debug(`Found ${offers.length} offers on first request`);
       return offers;
     }
 
     const requestId = this.extractRequestId(firstPayload);
     if (!requestId) {
+      this.logger.warn('No requestId in GetTours response, cannot poll');
       return offers;
     }
 
-    const maxAttempts = 3;
-    const pollDelayMs = 2000;
+    this.logger.debug(`Polling with requestId=${requestId}`);
+    const maxAttempts = 5;
+    const pollDelayMs = 3000;
 
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       await this.sleep(pollDelayMs);
@@ -116,15 +135,20 @@ export class SletatApiService implements SletatClient {
 
       offers = this.mapOffers(pollPayload);
       if (offers.length > 0) {
+        this.logger.debug(`Found ${offers.length} offers on poll attempt ${attempt + 1}`);
         return offers;
       }
     }
 
+    this.logger.warn(`No offers after ${maxAttempts} poll attempts`);
     return offers;
   }
 
   private extractRequestId(payload: Record<string, unknown>): string | undefined {
-    const data = payload.GetToursResult ?? payload.data ?? payload;
+    const top = payload.GetToursResult ?? payload;
+    const data = (typeof top === 'object' && top !== null)
+      ? ((top as Record<string, unknown>).Data ?? (top as Record<string, unknown>).data ?? top)
+      : top;
     if (typeof data === 'object' && data !== null) {
       const d = data as Record<string, unknown>;
       const id = d.requestId ?? d.RequestId;
@@ -284,14 +308,22 @@ export class SletatApiService implements SletatClient {
   }
 
   private toSearchParams(request: SletatNormalizedRequest): Record<string, unknown> {
+    const now = new Date();
+    const defaultFrom = new Date(now.getTime() + 1 * 86400000);
+    const defaultTo = new Date(now.getTime() + 30 * 86400000);
+
+    const formatDate = (d: Date) =>
+      d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\./g, '/');
+
     const dateFrom = request.dateFrom
-      ? new Date(request.dateFrom).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\./g, '/')
-      : undefined;
+      ? formatDate(new Date(request.dateFrom))
+      : formatDate(defaultFrom);
     const dateTo = request.dateTo
-      ? new Date(request.dateTo).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\./g, '/')
-      : undefined;
+      ? formatDate(new Date(request.dateTo))
+      : formatDate(defaultTo);
+
     return {
-      cityFromId: request.departureCityId,
+      cityFromId: request.departureCityId ?? 832,
       countryId: request.countryId,
       cities: request.resortId,
       meals: request.mealId,
@@ -300,7 +332,7 @@ export class SletatApiService implements SletatClient {
       s_kids: request.children ?? 0,
       s_kids_ages: request.childrenAges?.join(','),
       s_nightsMin: request.nightsFrom ?? 3,
-      s_nightsMax: request.nightsTo ?? 15,
+      s_nightsMax: request.nightsTo ?? 14,
       s_departFrom: dateFrom,
       s_departTo: dateTo,
       s_priceMin: request.budgetMin,
@@ -392,6 +424,19 @@ export class SletatApiService implements SletatClient {
       status: String(claim.status ?? claim.state ?? 'PENDING'),
       paymentUrl: this.optionalString(claim.paymentUrl ?? claim.url),
     };
+  }
+
+  private mapHotels(payload: Record<string, unknown>): SletatHotelItem[] {
+    const raw = this.pickArray(payload, ['GetHotelsResult', 'hotels', 'Hotels']);
+    return raw.map((item) => ({
+      id: String(item.Id ?? item.id ?? ''),
+      name: String(item.Name ?? item.name ?? ''),
+      starId: this.optionalString(item.StarId ?? item.starId),
+      starName: this.optionalString(item.StarName ?? item.starName),
+      townId: this.optionalString(item.TownId ?? item.townId),
+      rating: this.optionalNumber(item.Rating ?? item.rating),
+      photosCount: this.optionalNumber(item.PhotosCount ?? item.photosCount) ?? 0,
+    })).filter((h) => h.id && h.name);
   }
 
   private mapShowcase(payload: Record<string, unknown>): SletatShowcaseItem[] {

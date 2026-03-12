@@ -3,6 +3,7 @@ import { SletatClient } from './sletat.client';
 import {
   SletatClaimInfo,
   SletatDictionaryItem,
+  SletatHotelItem,
   SletatNormalizedRequest,
   SletatSearchOffer,
   SletatShowcaseItem,
@@ -41,8 +42,23 @@ export class SletatMockService implements SletatClient {
     ];
   }
 
-  async loadHotels(): Promise<SletatDictionaryItem[]> {
+  async loadHotels(_countryId?: number): Promise<SletatHotelItem[]> {
     return [];
+  }
+
+  async loadCities(_countryId: number): Promise<SletatDictionaryItem[]> {
+    return [
+      { id: '200', code: 'ANT', name: 'Анталья' },
+      { id: '201', code: 'BOD', name: 'Бодрум' },
+    ];
+  }
+
+  async loadHotelStars(_countryId: number): Promise<SletatDictionaryItem[]> {
+    return [
+      { id: '3', code: '3', name: '3*' },
+      { id: '4', code: '4', name: '4*' },
+      { id: '5', code: '5', name: '5*' },
+    ];
   }
 
   async normalizeRequest(parsed: ParsedTourRequest): Promise<SletatNormalizedRequest> {
