@@ -273,7 +273,10 @@ export class SletatService implements OnModuleInit {
       return JSON.parse(cached) as T;
     }
     const value = await loader();
-    await this.redis.set(key, JSON.stringify(value), 'EX', CACHE_TTL_SECONDS);
+    const isEmpty = Array.isArray(value) && value.length === 0;
+    if (!isEmpty) {
+      await this.redis.set(key, JSON.stringify(value), 'EX', CACHE_TTL_SECONDS);
+    }
     return value;
   }
 }

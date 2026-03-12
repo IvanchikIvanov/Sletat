@@ -87,8 +87,19 @@ export class MemoryService {
     if (!profile) return null;
 
     const defaults: Record<string, string> = {};
-    if (profile.departureCityCode) defaults.departureCityCode = profile.departureCityCode;
-    if (profile.countryCode) defaults.lastCountryCode = profile.countryCode;
+
+    if (profile.departureCityCode) {
+      defaults.departureCityCode = profile.departureCityCode;
+      const depCity = await this.cache.getAllDepartureCities()
+        .then((cities) => cities.find((c) => c.id === profile.departureCityCode));
+      if (depCity) defaults.departureCity = depCity.name;
+    }
+    if (profile.countryCode) {
+      defaults.lastCountryCode = profile.countryCode;
+      const country = await this.cache.getCountries()
+        .then((countries) => countries.find((c) => c.id === profile.countryCode));
+      if (country) defaults.lastCountry = country.name;
+    }
     if (profile.mealCode) defaults.lastMealCode = profile.mealCode;
     if (profile.hotelCategory) defaults.lastHotelCategory = profile.hotelCategory;
     if (profile.adults) defaults.lastAdults = String(profile.adults);

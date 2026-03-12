@@ -280,10 +280,23 @@ export class SletatApiService implements SletatClient {
 
     const text = response.body.trim();
     if (!text) return {};
+    let parsed: Record<string, unknown>;
     if (protocol === 'json' || text.startsWith('{') || text.startsWith('[')) {
-      return this.parseJson(text);
+      parsed = this.parseJson(text);
+    } else {
+      parsed = this.parseXmlFlat(text);
     }
-    return this.parseXmlFlat(text);
+
+    const topResult = Object.values(parsed).find(
+      (v) => typeof v === 'object' && v !== null && 'IsError' in (v as Record<string, unknown>),
+    ) as Record<string, unknown> | undefined;
+    if (topResult?.IsError === true) {
+      const msg = String(topResult.ErrorMessage ?? 'Unknown Sletat API error');
+      this.logger.error(`Sletat API error: ${msg}`);
+      throw new Error(`Sletat API: ${msg}`);
+    }
+
+    return parsed;
   }
 
   private async sendHttpRequest(
