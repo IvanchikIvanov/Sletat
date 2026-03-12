@@ -2,33 +2,41 @@ import { Injectable } from '@nestjs/common';
 import { Telegraf } from 'telegraf';
 import { InjectBot } from 'nestjs-telegraf';
 import { NotificationReason, SearchResult } from '@prisma/client';
-import { encodeBookCallback, encodeWatchCallback } from './telegram.types';
+import {
+  encodeBookCallback,
+  encodeWatchCallback,
+  encodePageCallback,
+  buildTourLink,
+} from './telegram.types';
 import { SletatShowcaseItem } from '../sletat/sletat.types';
+
+const OFFERS_PER_PAGE = 3;
+
+export interface SearchOffer {
+  id: string;
+  hotelName?: string | null;
+  countryName?: string | null;
+  resortName?: string | null;
+  mealName?: string | null;
+  dateFrom?: Date | null;
+  dateTo?: Date | null;
+  nights?: number | null;
+  price: number;
+  currency: string;
+  externalOfferId: string;
+}
+
+export interface SearchResultPayload {
+  profileId: string;
+  profileName: string;
+  offers: SearchOffer[];
+}
 
 @Injectable()
 export class TelegramService {
   constructor(@InjectBot() private readonly bot: Telegraf) {}
 
-  async sendSearchResults(
-    chatId: number,
-    payload: {
-      profileId: string;
-      profileName: string;
-      offers: {
-        id: string;
-        hotelName?: string | null;
-        countryName?: string | null;
-        resortName?: string | null;
-        mealName?: string | null;
-        dateFrom?: Date | null;
-        dateTo?: Date | null;
-        nights?: number | null;
-        price: number;
-        currency: string;
-        externalOfferId: string;
-      }[];
-    },
-  ) {
+  async sendSearchResults(chatId: number, payload: SearchResultPayload) {
     if (!payload.offers.length) {
       await this.bot.telegram.sendMessage(
         chatId,
@@ -37,34 +45,75 @@ export class TelegramService {
       return;
     }
 
-    const [best, ...rest] = payload.offers;
-    const lines = [
-      `Профиль: ${payload.profileName}`,
+    await this.sendResultsPage(chatId, payload, 0);
+  }
+
+  async sendResultsPage(
+    chatId: number,
+    payload: SearchResultPayload,
+    page: number,
+    editMessageId?: number,
+  ) {
+    const total = payload.offers.length;
+    const totalPages = Math.ceil(total / OFFERS_PER_PAGE);
+    const start = page * OFFERS_PER_PAGE;
+    const pageOffers = payload.offers.slice(start, start + OFFERS_PER_PAGE);
+
+    const lines: string[] = [
+      `🔍 Найдено ${total} ${this.pluralTours(total)} по запросу «${payload.profileName}»`,
+      `📄 Страница ${page + 1} из ${totalPages}`,
       '',
-      this.formatOfferLine(best),
-      '',
-      'Другие варианты:',
-      ...rest.slice(0, 4).map((o, i) => `${i + 2}) ${this.formatOfferLine(o)}`),
     ];
 
-    await this.bot.telegram.sendMessage(chatId, lines.join('\n'), {
-      reply_markup: {
-        inline_keyboard: [
-          [
-            {
-              text: 'Следить за ценой',
-              callback_data: encodeWatchCallback(payload.profileId),
-            },
-          ],
-          [
-            {
-              text: 'Бронировать лучший вариант',
-              callback_data: encodeBookCallback(best.id, payload.profileId),
-            },
-          ],
-        ],
-      },
-    });
+    for (let i = 0; i < pageOffers.length; i++) {
+      const o = pageOffers[i];
+      const num = start + i + 1;
+      lines.push(`${num}) ${this.formatOfferCard(o)}`);
+    }
+
+    const keyboard: { text: string; callback_data: string; url?: string }[][] = [];
+
+    for (const o of pageOffers) {
+      const row: { text: string; callback_data: string; url?: string }[] = [];
+      const link = buildTourLink(o.externalOfferId);
+      if (link) {
+        row.push({ text: '🔗 Подробнее', callback_data: `noop`, url: link });
+      }
+      row.push({
+        text: '📝 Бронировать',
+        callback_data: encodeBookCallback(o.id, payload.profileId),
+      });
+      keyboard.push(row);
+    }
+
+    const navRow: { text: string; callback_data: string }[] = [];
+    if (page > 0) {
+      navRow.push({ text: '⬅️ Назад', callback_data: encodePageCallback(payload.profileId, page - 1) });
+    }
+    if (page < totalPages - 1) {
+      navRow.push({ text: '➡️ Далее', callback_data: encodePageCallback(payload.profileId, page + 1) });
+    }
+    if (navRow.length) keyboard.push(navRow);
+
+    keyboard.push([
+      { text: '👀 Следить за ценой', callback_data: encodeWatchCallback(payload.profileId) },
+    ]);
+
+    const msgText = lines.join('\n');
+    const markup = { inline_keyboard: keyboard };
+
+    if (editMessageId) {
+      try {
+        await this.bot.telegram.editMessageText(chatId, editMessageId, undefined, msgText, {
+          reply_markup: markup,
+        });
+        return;
+      } catch {
+        // fallback to new message
+      }
+    }
+
+    await this.bot.telegram.sendMessage(chatId, msgText, { reply_markup: markup });
   }
 
   async sendOfferNotification(
@@ -75,10 +124,10 @@ export class TelegramService {
     const chatId = Number(telegramId);
     const reasonText =
       reason === NotificationReason.PRICE_DROP
-        ? 'Цена понизилась!'
-        : 'Появился вариант в твоём бюджете!';
+        ? '📉 Цена понизилась!'
+        : '💰 Появился вариант в твоём бюджете!';
 
-    const text = `${reasonText}\n\n${this.formatOfferLine({
+    const card = this.formatOfferCard({
       hotelName: result.hotelName,
       countryName: result.countryName,
       resortName: result.resortName,
@@ -88,21 +137,20 @@ export class TelegramService {
       nights: result.nights,
       price: result.price,
       currency: result.currency,
-      id: result.id,
       externalOfferId: result.externalOfferId,
-    })}`;
+    });
 
-    await this.bot.telegram.sendMessage(chatId, text, {
-      reply_markup: {
-        inline_keyboard: [
-          [
-            {
-              text: 'Бронировать',
-              callback_data: encodeBookCallback(result.id),
-            },
-          ],
-        ],
-      },
+    const keyboard: { text: string; callback_data: string; url?: string }[][] = [];
+    const link = buildTourLink(result.externalOfferId);
+    const actionRow: { text: string; callback_data: string; url?: string }[] = [];
+    if (link) {
+      actionRow.push({ text: '🔗 Подробнее', callback_data: 'noop', url: link });
+    }
+    actionRow.push({ text: '📝 Бронировать', callback_data: encodeBookCallback(result.id) });
+    keyboard.push(actionRow);
+
+    await this.bot.telegram.sendMessage(chatId, `${reasonText}\n\n${card}`, {
+      reply_markup: { inline_keyboard: keyboard },
     });
   }
 
@@ -133,7 +181,7 @@ export class TelegramService {
     await this.bot.telegram.sendMessage(chatId, lines.join('\n'));
   }
 
-  private formatOfferLine(o: {
+  private formatOfferCard(o: {
     hotelName?: string | null;
     countryName?: string | null;
     resortName?: string | null;
@@ -143,24 +191,39 @@ export class TelegramService {
     nights?: number | null;
     price: number;
     currency: string;
-    id?: string;
     externalOfferId?: string;
   }): string {
-    const parts: string[] = [];
-    if (o.hotelName) parts.push(o.hotelName);
-    if (o.countryName) parts.push(o.countryName);
-    if (o.resortName) parts.push(o.resortName);
-    if (o.mealName) parts.push(o.mealName);
-    if (o.nights) parts.push(`${o.nights} ночей`);
-    if (o.dateFrom && o.dateTo) {
-      parts.push(
-        `${o.dateFrom.toISOString().slice(0, 10)}–${o.dateTo
-          .toISOString()
-          .slice(0, 10)}`,
-      );
+    const lines: string[] = [];
+
+    if (o.hotelName) {
+      lines.push(`🏨 ${o.hotelName}`);
     }
-    parts.push(`${o.price} ${o.currency}`);
-    return parts.join(', ');
+
+    const location: string[] = [];
+    if (o.countryName) location.push(o.countryName);
+    if (o.resortName) location.push(o.resortName);
+    if (location.length) lines.push(`📍 ${location.join(', ')}`);
+
+    if (o.mealName) lines.push(`🍽 ${o.mealName}`);
+
+    const dateInfo: string[] = [];
+    if (o.nights) dateInfo.push(`${o.nights} ночей`);
+    if (o.dateFrom) {
+      const from = o.dateFrom instanceof Date ? o.dateFrom.toISOString().slice(0, 10) : String(o.dateFrom).slice(0, 10);
+      dateInfo.push(`с ${from}`);
+    }
+    if (dateInfo.length) lines.push(`📅 ${dateInfo.join(', ')}`);
+
+    lines.push(`💰 ${o.price.toLocaleString('ru-RU')} ${o.currency}`);
+
+    return lines.join('\n');
+  }
+
+  private pluralTours(n: number): string {
+    const mod10 = n % 10;
+    const mod100 = n % 100;
+    if (mod10 === 1 && mod100 !== 11) return 'тур';
+    if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return 'тура';
+    return 'туров';
   }
 }
-

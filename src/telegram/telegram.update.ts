@@ -3,6 +3,8 @@ import { Context, Telegraf } from 'telegraf';
 import { Logger } from '@nestjs/common';
 import { OpenAiService } from '../openai/openai.service';
 import { UserRepository } from '../persistence/repositories/user.repository';
+import { SearchResultRepository } from '../persistence/repositories/search-result.repository';
+import { SearchProfileRepository } from '../persistence/repositories/search-profile.repository';
 import { SearchService } from '../search/search.service';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { BookingService } from '../booking/booking.service';
@@ -10,7 +12,7 @@ import { TelegramService } from './telegram.service';
 import { DialogContextService } from '../dialog/dialog-context.service';
 import { MemoryService } from '../memory/memory.service';
 import { SletatService } from '../sletat/sletat.service';
-import { decodeBookCallback, decodeWatchCallback } from './telegram.types';
+import { decodeBookCallback, decodeWatchCallback, decodePageCallback } from './telegram.types';
 import { ParseTourResponse } from '../openai/dto/tour-request.schema';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -42,6 +44,8 @@ export class TelegramUpdate {
     @InjectBot() private readonly bot: Telegraf,
     private readonly openAi: OpenAiService,
     private readonly users: UserRepository,
+    private readonly searchResults: SearchResultRepository,
+    private readonly searchProfiles: SearchProfileRepository,
     private readonly search: SearchService,
     private readonly subscriptions: SubscriptionsService,
     private readonly booking: BookingService,
@@ -518,6 +522,52 @@ export class TelegramUpdate {
     await ctx.reply(
       `Бронирование создано. Статус: ${result.status}.\n${paymentText}`,
     );
+  }
+
+  @Action(/^page:.+/)
+  async onPage(@Ctx() ctx: Context) {
+    if (!ctx.callbackQuery || !('data' in ctx.callbackQuery)) return;
+    const decoded = decodePageCallback(ctx.callbackQuery.data);
+    if (!decoded) return;
+
+    await ctx.answerCbQuery();
+
+    const profile = await this.searchProfiles.findById(decoded.profileId);
+    if (!profile) return;
+
+    const results = await this.searchResults.findActiveByProfile(decoded.profileId);
+    if (!results.length) return;
+
+    const payload = {
+      profileId: profile.id,
+      profileName: profile.name,
+      offers: results.map((r) => ({
+        id: r.id,
+        hotelName: r.hotelName,
+        countryName: r.countryName,
+        resortName: r.resortName,
+        mealName: r.mealName,
+        dateFrom: r.dateFrom,
+        dateTo: r.dateTo,
+        nights: r.nights,
+        price: r.price,
+        currency: r.currency,
+        externalOfferId: r.externalOfferId,
+      })),
+    };
+
+    const messageId = ctx.callbackQuery.message?.message_id;
+    await this.telegram.sendResultsPage(
+      ctx.chat!.id,
+      payload,
+      decoded.page,
+      messageId,
+    );
+  }
+
+  @Action('noop')
+  async onNoop(@Ctx() ctx: Context) {
+    await ctx.answerCbQuery();
   }
 
   private async ensureUser(ctx: Context) {
