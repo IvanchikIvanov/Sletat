@@ -183,7 +183,23 @@ export class SletatService implements OnModuleInit {
     const townFromId = departureCityId ? Number(departureCityId) : 832;
     const countries = await this.getCountriesForCity(townFromId);
 
-    const countryId = this.findDictionaryId(countries, parsed.country ?? parsed.resort);
+    this.logger.debug(`normalizeRequest: departures=${departures.length}, countries=${countries.length}, ` +
+      `parsed.country="${parsed.country}", parsed.resort="${parsed.resort}"`);
+
+    let countryId = this.findDictionaryId(countries, parsed.country ?? parsed.resort);
+
+    if (!countryId && (parsed.country || parsed.resort)) {
+      const dbCountry = await this.findCountryInDb(parsed.country ?? parsed.resort ?? '');
+      if (dbCountry) {
+        countryId = dbCountry.id;
+        this.logger.debug(`Found country in DB cache: ${dbCountry.name} (id=${dbCountry.id})`);
+      }
+    }
+
+    if (!countryId && (parsed.country || parsed.resort)) {
+      this.logger.warn(`Could not resolve country: "${parsed.country ?? parsed.resort}" ` +
+        `from ${countries.length} countries (townFromId=${townFromId})`);
+    }
 
     let resortId: string | undefined;
     if (countryId && parsed.resort) {

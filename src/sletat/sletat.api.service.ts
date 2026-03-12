@@ -26,14 +26,30 @@ export class SletatApiService implements SletatClient {
 
   async loadDepartureCities(): Promise<SletatDictionaryItem[]> {
     const payload = await this.callSearchApi('SLETAT_ENDPOINT_DEPARTURE_CITIES', this.config.sletat.protocol, {});
-    return this.mapDictionary(payload, ['GetDepartCitiesResult', 'departures', 'departureCities', 'cities']);
+    const result = this.mapDictionary(payload, ['GetDepartCitiesResult', 'departures', 'departureCities', 'cities', 'DepartCityList']);
+    if (!result.length) {
+      this.logger.warn(`loadDepartureCities returned 0 items. Payload keys: ${Object.keys(payload).join(', ')}`);
+      const topVal = payload.GetDepartCitiesResult ?? payload;
+      if (typeof topVal === 'object' && topVal !== null) {
+        this.logger.debug(`DepartCities payload: ${JSON.stringify(topVal).slice(0, 500)}`);
+      }
+    }
+    return result;
   }
 
   async loadCountries(townFromId = 832): Promise<SletatDictionaryItem[]> {
     const payload = await this.callSearchApi('SLETAT_ENDPOINT_COUNTRIES', this.config.sletat.protocol, {
       townFromId,
     });
-    return this.mapDictionary(payload, ['GetCountriesResult', 'countries']);
+    const result = this.mapDictionary(payload, ['GetCountriesResult', 'countries', 'CountryList']);
+    if (!result.length) {
+      this.logger.warn(`loadCountries(${townFromId}) returned 0 items. Payload keys: ${Object.keys(payload).join(', ')}`);
+      const topVal = payload.GetCountriesResult ?? payload;
+      if (typeof topVal === 'object' && topVal !== null) {
+        this.logger.debug(`Payload structure: ${JSON.stringify(topVal).slice(0, 500)}`);
+      }
+    }
+    return result;
   }
 
   async loadMeals(): Promise<SletatDictionaryItem[]> {
