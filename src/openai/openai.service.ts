@@ -65,9 +65,8 @@ export class OpenAiService {
     try {
       const completion = await this.client.chat.completions.create({
         model: this.config.openAi.model,
-        response_format: { type: 'json_object' },
         messages,
-        temperature: 0.5,
+        temperature: 0.7,
       });
 
       const content = completion.choices[0]?.message?.content;
@@ -75,12 +74,13 @@ export class OpenAiService {
         throw new Error('Empty response from OpenAI');
       }
 
-      const raw = JSON.parse(content) as Record<string, unknown>;
-      const readyToSearch = Boolean(raw.readyToSearch);
+      const { message, data } = this.parseResponseWithData(content);
+
+      const readyToSearch = Boolean(data?.readyToSearch);
       const clarificationMessage =
-        typeof raw.clarificationMessage === 'string' ? raw.clarificationMessage : undefined;
-      const parsed = (raw.parsed ?? {}) as Record<string, unknown>;
-      const intent = typeof raw.intent === 'string' ? raw.intent as any : undefined;
+        message?.trim() || (data ? 'Не удалось составить ответ. Попробуй переформулировать? 😊' : undefined);
+      const parsed = (data?.parsed ?? {}) as Record<string, unknown>;
+      const intent = typeof data?.intent === 'string' ? (data.intent as any) : undefined;
 
       return {
         readyToSearch,
@@ -91,6 +91,34 @@ export class OpenAiService {
     } catch (error) {
       this.logger.error('Failed to parse tour request', error as Error);
       throw error;
+    }
+  }
+
+  /**
+   * Парсит ответ: свободный текст + блок [DATA]...[/DATA] с JSON.
+   * Fallback: если [DATA] нет — пробуем распарсить весь ответ как JSON.
+   */
+  private parseResponseWithData(content: string): {
+    message: string;
+    data: Record<string, unknown> | null;
+  } {
+    const dataMatch = content.match(/\[DATA\]\s*([\s\S]*?)\s*\[\/DATA\]/);
+    if (dataMatch) {
+      const message = content.slice(0, dataMatch.index).trim();
+      try {
+        const data = JSON.parse(dataMatch[1].trim()) as Record<string, unknown>;
+        return { message, data };
+      } catch {
+        this.logger.warn('Failed to parse [DATA] JSON, using fallback');
+      }
+    }
+    // Fallback: весь ответ как JSON (старый формат)
+    try {
+      const data = JSON.parse(content) as Record<string, unknown>;
+      const msg = typeof data.clarificationMessage === 'string' ? data.clarificationMessage : '';
+      return { message: msg, data };
+    } catch {
+      return { message: content, data: null };
     }
   }
 
@@ -188,10 +216,12 @@ export class OpenAiService {
     }
 
     prompt +=
-      'ФОРМАТ ОТВЕТА — строго JSON без комментариев:\n' +
-      '{"readyToSearch": boolean, "intent": "search"|"monitor"|"hot"|"chat", "clarificationMessage": "живой текст или null", "parsed": {' +
-      'departureCity, country, resort, destinationMode, hotelCategory, mealType, adults, children, childrenAges, ' +
-      'dateFrom, dateTo, nightsFrom, nightsTo, budgetMin, budgetMax, currency, preferences}}';
+      'ФОРМАТ ОТВЕТА:\n' +
+      '1. Сначала напиши своё сообщение пользователю — живым языком, 2-4 предложения, с энтузиазмом. Это то, что увидит пользователь.\n' +
+      '2. В самом конце добавь блок с данными (пользователь его не видит):\n' +
+      '[DATA]\n' +
+      '{"readyToSearch": boolean, "intent": "search"|"monitor"|"hot"|"chat", "parsed": {departureCity, country, resort, destinationMode, hotelCategory, mealType, adults, children, childrenAges, dateFrom, dateTo, nightsFrom, nightsTo, budgetMin, budgetMax, currency, preferences}}\n' +
+      '[/DATA]';
 
     return prompt;
   }
