@@ -296,6 +296,14 @@ export class SletatApiService implements SletatClient {
     return new Date(y, (m ?? 1) - 1, d ?? 1);
   }
 
+  /** Парсит дату из ISO или DD/MM/YYYY. Возвращает null при невалидной строке. */
+  private parseDateFlexible(s: string): Date | null {
+    const iso = new Date(s);
+    if (!isNaN(iso.getTime())) return iso;
+    const ru = this.parseRuDate(s);
+    return isNaN(ru.getTime()) ? null : ru;
+  }
+
   private trySplitSlice(
     request: SletatNormalizedRequest,
     total: number,
@@ -672,12 +680,10 @@ export class SletatApiService implements SletatClient {
     const formatDate = (d: Date) =>
       d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\./g, '/');
 
-    const dateFrom = request.dateFrom
-      ? formatDate(this.parseRuDate(request.dateFrom))
-      : formatDate(defaultFrom);
-    const dateTo = request.dateTo
-      ? formatDate(this.parseRuDate(request.dateTo))
-      : formatDate(defaultTo);
+    const parsedFrom = request.dateFrom ? this.parseDateFlexible(request.dateFrom) : null;
+    const parsedTo = request.dateTo ? this.parseDateFlexible(request.dateTo) : null;
+    const dateFrom = parsedFrom ? formatDate(parsedFrom) : formatDate(defaultFrom);
+    const dateTo = parsedTo ? formatDate(parsedTo) : formatDate(defaultTo);
 
     return {
       cityFromId: request.departureCityId ?? 832,
