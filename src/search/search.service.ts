@@ -72,7 +72,10 @@ export class SearchService {
     }
 
     // Шаг 2: Поиск через API Sletat
-    const offers = await this.sletat.searchTours(normalized);
+    let offers = await this.sletat.searchTours(normalized);
+
+    // Sletat может не строго соблюдать s_priceMax — фильтруем на своей стороне
+    offers = this.filterOffersByBudget(offers, normalized.budgetMin, normalized.budgetMax);
 
     if (!offers.length) {
       await this.requests.markFailed(request.id, 'No offers found');
@@ -169,7 +172,8 @@ export class SearchService {
       }
     }
 
-    allOffers.sort((a, b) => a.price - b.price);
+    let filtered = this.filterOffersByBudget(allOffers, baseNormalized.budgetMin, baseNormalized.budgetMax);
+    filtered.sort((a, b) => a.price - b.price);
 
     const profileName = `Страны без визы из ${context.parsed.departureCity ?? 'РФ'}`;
     const profile = await this.profiles.upsertForUser({
@@ -199,7 +203,7 @@ export class SearchService {
       parsedJson: { ...context.parsed, destinationMode: 'visa_free' },
     });
 
-    if (!allOffers.length) {
+    if (!filtered.length) {
       await this.requests.markFailed(request.id, 'No offers found');
       return { profileId: profile.id, profileName: profile.name, offers: [] };
     }
@@ -208,7 +212,7 @@ export class SearchService {
 
     const dbResults = await this.results.createManyForProfile(
       profile.id,
-      allOffers.map((o) => this.offerToDbRow(o)),
+      filtered.map((o) => this.offerToDbRow(o)),
     );
 
     return this.buildResult(profile.id, profile.name, dbResults);
@@ -256,7 +260,8 @@ export class SearchService {
       currency: profile.currency ?? undefined,
     };
 
-    const offers = await this.sletat.searchTours(normalized);
+    let offers = await this.sletat.searchTours(normalized);
+    offers = this.filterOffersByBudget(offers, normalized.budgetMin, normalized.budgetMax);
     if (!offers.length) return [];
 
     const dbResults = await this.results.createManyForProfile(
@@ -265,6 +270,19 @@ export class SearchService {
     );
 
     return dbResults;
+  }
+
+  private filterOffersByBudget(
+    offers: SletatSearchOffer[],
+    budgetMin?: number,
+    budgetMax?: number,
+  ): SletatSearchOffer[] {
+    if (!budgetMin && !budgetMax) return offers;
+    return offers.filter((o) => {
+      if (budgetMax != null && o.price > budgetMax) return false;
+      if (budgetMin != null && o.price < budgetMin) return false;
+      return true;
+    });
   }
 
   private offerToDbRow(o: SletatSearchOffer) {
