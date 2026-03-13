@@ -125,7 +125,19 @@ export class SletatService implements OnModuleInit {
   // ─── Поиск по БД-кэшу ───
 
   async findCountryInDb(name: string) {
-    return this.cache.findCountryByName(name);
+    let found = await this.cache.findCountryByName(name);
+    if (found) return found;
+    const lower = name.trim().toLowerCase();
+    const aliases: Record<string, string> = {
+      тай: 'Таиланд',
+      тайланд: 'Таиланд',
+      турция: 'Турция',
+      египет: 'Египет',
+      вьетнам: 'Вьетнам',
+    };
+    const canonical = aliases[lower] ?? aliases[lower.replace(/и$/, '')];
+    if (canonical) return this.cache.findCountryByName(canonical);
+    return null;
   }
 
   async findResortInDb(name: string, countryId: string) {

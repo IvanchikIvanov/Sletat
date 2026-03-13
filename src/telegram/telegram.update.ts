@@ -185,11 +185,20 @@ export class TelegramUpdate {
     await this.sendHotDeals(ctx, depCity.id, depCity.name);
   }
 
-  private async sendHotDeals(ctx: Context, depCityId: string, depCityName: string) {
-    this.logger.log(`/hot request: depCityId=${depCityId}, depCityName=${depCityName}`);
+  private async sendHotDeals(
+    ctx: Context,
+    depCityId: string,
+    depCityName: string,
+    countryFilter?: { countryId: string; countryName: string },
+  ) {
+    const filterLog = countryFilter ? ` country=${countryFilter.countryName}` : '';
+    this.logger.log(`/hot request: depCityId=${depCityId}, depCityName=${depCityName}${filterLog}`);
 
-    const dbDeals = await this.sletat.getHotDealsFromDb(Number(depCityId));
-    this.logger.log(`/hot DB cache: ${dbDeals.length} deals for dep ${depCityId}`);
+    const townFromId = Number(depCityId);
+    const dbDeals = countryFilter
+      ? await this.sletat.getHotDealsForCountryFromDb(countryFilter.countryId, townFromId)
+      : await this.sletat.getHotDealsFromDb(townFromId);
+    this.logger.log(`/hot DB cache: ${dbDeals.length} deals for dep ${depCityId}${filterLog}`);
 
     if (dbDeals.length > 0) {
       for (const d of dbDeals.slice(0, 5)) {
@@ -199,7 +208,10 @@ export class TelegramUpdate {
         this.logger.debug(`  ... and ${dbDeals.length - 5} more`);
       }
 
-      const lines = [`🔥 Горящие туры из ${depCityName}:`, ''];
+      const title = countryFilter
+        ? `🔥 Горящие туры в ${countryFilter.countryName} из ${depCityName}:`
+        : `🔥 Горящие туры из ${depCityName}:`;
+      const lines = [title, ''];
       for (const d of dbDeals.slice(0, 15)) {
         const parts: string[] = [];
         if (d.hotelName) parts.push(d.hotelName);
@@ -225,14 +237,19 @@ export class TelegramUpdate {
       } catch {}
     }, 4000);
     try {
-      const items = await this.sletat.getHotDealsAll();
-      this.logger.log(`/hot API fallback: ${items.length} items`);
+      const items = countryFilter
+        ? await this.sletat.getHotDealsForCountry(countryFilter.countryName, depCityName)
+        : await this.sletat.getHotDealsAll(depCityName);
+      this.logger.log(`/hot API fallback: ${items.length} items${filterLog}`);
       if (items.length > 0) {
         for (const item of items.slice(0, 3)) {
           this.logger.debug(`  api item: ${JSON.stringify(item)}`);
         }
       }
-      await this.telegram.sendShowcaseResults(chatId, items, `🔥 Горящие туры из ${depCityName}:`);
+      const apiTitle = countryFilter
+        ? `🔥 Горящие туры в ${countryFilter.countryName} из ${depCityName}:`
+        : `🔥 Горящие туры из ${depCityName}:`;
+      await this.telegram.sendShowcaseResults(chatId, items, apiTitle);
     } finally {
       clearInterval(typingInterval);
       try {
@@ -410,23 +427,47 @@ export class TelegramUpdate {
     const intent = response.intent ?? 'search';
 
     if (intent === 'hot') {
-      const depCity = await this.resolveUserDepartureCity(userId);
-      if (depCity) {
-        await this.dialogCtx.clear(userId);
-        await this.sendHotDeals(ctx, depCity.id, depCity.name);
-        return;
-      }
-      if (response.parsed.departureCity) {
-        const found = await this.sletat.findDepartureCityInDb(response.parsed.departureCity);
+      const mergedParsed = previous
+        ? this.dialogCtx.mergeParsed(previous.parsed, response.parsed)
+        : response.parsed;
+
+      let depCity: { id: string; name: string } | null = await this.resolveUserDepartureCity(userId);
+      if (!depCity && mergedParsed.departureCity) {
+        const found = await this.sletat.findDepartureCityInDb(mergedParsed.departureCity);
         if (found) {
-          await this.dialogCtx.clear(userId);
+          depCity = { id: found.id, name: found.name };
           this.memory.extractFactsFromMessage(userId, `Мой город вылета: ${found.name}`).catch(() => {});
-          await this.sendHotDeals(ctx, found.id, found.name);
-          return;
         }
       }
+
+      if (depCity) {
+        let countryFilter: { countryId: string; countryName: string } | undefined;
+        const countryRaw = mergedParsed.country ?? mergedParsed.resort;
+        if (countryRaw && typeof countryRaw === 'string') {
+          const country = await this.sletat.findCountryInDb(countryRaw);
+          if (country) {
+            countryFilter = { countryId: country.id, countryName: country.name };
+          }
+        }
+
+        const title = countryFilter
+          ? `Горящие туры в ${countryFilter.countryName}`
+          : 'Горящие туры';
+        const messages = previous?.messages ? [...previous.messages] : [];
+        messages.push({ role: 'user', content: text });
+        messages.push({ role: 'assistant', content: `Показал ${title}.` });
+        await this.dialogCtx.save(userId, {
+          parsed: mergedParsed,
+          messages,
+          lastClarification: undefined,
+          updatedAt: new Date().toISOString(),
+        });
+        await this.sendHotDeals(ctx, depCity.id, depCity.name, countryFilter);
+        return;
+      }
+
       await this.dialogCtx.save(userId, {
-        parsed: response.parsed,
+        parsed: mergedParsed,
         messages: [],
         lastClarification: '__awaiting_departure_for_hot__',
         updatedAt: new Date().toISOString(),
