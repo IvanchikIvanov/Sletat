@@ -3,4 +3,5 @@ export interface MemoryContext {
   userPreferences: string[];
   relevantKnowledge: string[];
   userDefaults?: Record<string, string> | null;
+  lastParsed?: Record<string, unknown> | null;
 }

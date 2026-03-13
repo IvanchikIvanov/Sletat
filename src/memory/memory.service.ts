@@ -5,6 +5,7 @@ import { KnowledgeService } from '../knowledge/knowledge.service';
 import { SletatService } from '../sletat/sletat.service';
 import { CacheRepository } from '../persistence/repositories/cache.repository';
 import { SearchProfileRepository } from '../persistence/repositories/search-profile.repository';
+import { SearchRequestRepository } from '../persistence/repositories/search-request.repository';
 import { MemoryContext } from './dto/memory-context.dto';
 import { ParsedTourRequest } from '../openai/dto/tour-request.schema';
 
@@ -18,22 +19,24 @@ export class MemoryService {
     private readonly knowledge: KnowledgeService,
     private readonly sletat: SletatService,
     private readonly profiles: SearchProfileRepository,
+    private readonly requests: SearchRequestRepository,
     private readonly cache: CacheRepository,
   ) {}
 
   async getContextForQuery(userId: string, query: string): Promise<MemoryContext> {
-    const [userFacts, userPreferences, relevantKnowledge, userDefaults, dbSummary] = await Promise.all([
+    const [userFacts, userPreferences, relevantKnowledge, userDefaults, lastParsed, dbSummary] = await Promise.all([
       this.factExtractor.getUserFacts(userId, query),
       this.preferences.findRelevantPreferences(userId, query),
       this.knowledge.findRelevantKnowledge(query),
       this.getUserDefaults(userId),
+      this.requests.findLastSuccessfulParsed(userId),
       this.getDbCacheSummary(),
     ]);
 
     const enrichedKnowledge = [...relevantKnowledge];
     if (dbSummary) enrichedKnowledge.push(dbSummary);
 
-    return { userFacts, userPreferences, relevantKnowledge: enrichedKnowledge, userDefaults };
+    return { userFacts, userPreferences, relevantKnowledge: enrichedKnowledge, userDefaults, lastParsed };
   }
 
   private async getDbCacheSummary(): Promise<string | null> {
@@ -108,6 +111,12 @@ export class MemoryService {
     if (profile.adults) defaults.lastAdults = String(profile.adults);
     if (profile.children) defaults.lastChildren = String(profile.children);
     if (profile.name) defaults.lastProfileName = profile.name;
+    if (profile.dateFrom) defaults.lastDateFrom = profile.dateFrom.toISOString().slice(0, 10);
+    if (profile.dateTo) defaults.lastDateTo = profile.dateTo.toISOString().slice(0, 10);
+    if (profile.budgetMin != null) defaults.lastBudgetMin = String(profile.budgetMin);
+    if (profile.budgetMax != null) defaults.lastBudgetMax = String(profile.budgetMax);
+    if (profile.nightsFrom != null) defaults.lastNightsFrom = String(profile.nightsFrom);
+    if (profile.nightsTo != null) defaults.lastNightsTo = String(profile.nightsTo);
 
     return Object.keys(defaults).length > 0 ? defaults : null;
   }

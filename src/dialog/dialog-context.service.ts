@@ -16,7 +16,8 @@ export interface DialogContext {
 }
 
 const CONTEXT_PREFIX = 'dialog:ctx:';
-const CONTEXT_TTL = 1800; // 30 min
+const CONTEXT_TTL = 3600; // 1 hour
+const MAX_MESSAGES = 24; // ~12 пар user+assistant
 
 @Injectable()
 export class DialogContextService {
@@ -60,5 +61,10 @@ export class DialogContextService {
       }
     }
     return merged;
+  }
+
+  appendMessages(messages: DialogMessage[], user: string, assistant: string): DialogMessage[] {
+    const next = [...messages, { role: 'user' as const, content: user }, { role: 'assistant' as const, content: assistant }];
+    return next.slice(-MAX_MESSAGES);
   }
 }

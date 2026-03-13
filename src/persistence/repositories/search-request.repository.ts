@@ -43,5 +43,15 @@ export class SearchRequestRepository {
       },
     });
   }
+
+  async findLastSuccessfulParsed(userId: string): Promise<Record<string, unknown> | null> {
+    const req = await this.prisma.searchRequest.findFirst({
+      where: { userId, status: SearchRequestStatus.SUCCESS },
+      orderBy: { createdAt: 'desc' },
+      select: { parsedJson: true },
+    });
+    if (!req?.parsedJson) return null;
+    return req.parsedJson as Record<string, unknown>;
+  }
 }
 

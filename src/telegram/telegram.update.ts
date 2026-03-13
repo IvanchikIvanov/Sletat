@@ -484,8 +484,6 @@ export class TelegramUpdate {
       ? this.dialogCtx.mergeParsed(previous.parsed, response.parsed)
       : response.parsed;
 
-    await this.dialogCtx.clear(userId);
-
     let result;
 
     if (
@@ -518,6 +516,20 @@ export class TelegramUpdate {
       }
     }
 
+    const summary = result.offers.length > 0
+      ? `Нашёл ${result.offers.length} ${this.pluralTours(result.offers.length)} по запросу «${result.profileName}». Выбери вариант или напиши новый запрос.`
+      : 'Ничего не нашлось по этому запросу. Попробуй изменить параметры.';
+
+    const messages = previous
+      ? this.dialogCtx.appendMessages(previous.messages, text, summary)
+      : this.dialogCtx.appendMessages([], text, summary);
+
+    await this.dialogCtx.save(userId, {
+      parsed: finalParsed,
+      messages,
+      updatedAt: new Date().toISOString(),
+    });
+
     if (intent === 'monitor' && result.profileId) {
       const sub = await this.subscriptions.enableSubscriptionForProfile({
         userId,
@@ -534,6 +546,14 @@ export class TelegramUpdate {
     }
 
     await this.telegram.sendSearchResults(ctx.chat!.id, result);
+  }
+
+  private pluralTours(n: number): string {
+    const mod10 = n % 10;
+    const mod100 = n % 100;
+    if (mod10 === 1 && mod100 !== 11) return 'тур';
+    if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return 'тура';
+    return 'туров';
   }
 
   @Action(/^watch:.+/)

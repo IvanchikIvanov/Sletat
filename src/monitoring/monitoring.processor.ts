@@ -48,12 +48,21 @@ export class MonitoringProcessor {
       return;
     }
 
+    const profile = await this.profiles.findById(profileId);
+    if (!profile) return;
+
     const newResults = await this.searchService.searchForProfile(profileId);
     if (!newResults.length) {
       return;
     }
 
     const best = newResults[0];
+
+    const budgetMax = profile.budgetMax ?? subscription.maxPrice;
+    if (budgetMax != null && best.price > budgetMax) {
+      this.logger.debug(`Skipping notification: price ${best.price} > budget ${budgetMax}`);
+      return;
+    }
 
     const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
     const recentCount = await this.notifications.countForSubscriptionSince(
