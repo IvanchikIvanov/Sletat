@@ -673,10 +673,10 @@ export class SletatApiService implements SletatClient {
       d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\./g, '/');
 
     const dateFrom = request.dateFrom
-      ? formatDate(new Date(request.dateFrom))
+      ? formatDate(this.parseRuDate(request.dateFrom))
       : formatDate(defaultFrom);
     const dateTo = request.dateTo
-      ? formatDate(new Date(request.dateTo))
+      ? formatDate(this.parseRuDate(request.dateTo))
       : formatDate(defaultTo);
 
     return {
