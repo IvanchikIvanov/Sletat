@@ -16,8 +16,8 @@ export interface DialogContext {
 }
 
 const CONTEXT_PREFIX = 'dialog:ctx:';
-const CONTEXT_TTL = 3600; // 1 hour
-const MAX_MESSAGES = 24; // ~12 пар user+assistant
+const CONTEXT_TTL = 365 * 24 * 60 * 60; // 12 months
+const MAX_MESSAGES = 50_000;
 
 @Injectable()
 export class DialogContextService {
